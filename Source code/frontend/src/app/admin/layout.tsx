@@ -37,16 +37,27 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const [pwdMsg, setPwdMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   useEffect(() => {
-    if (!isLoading && !token) {
-      router.push("/login");
+    if (!isLoading && (!token || !user)) {
+      router.replace("/login");
     }
-  }, [isLoading, token, router]);
+  }, [isLoading, token, user, router]);
 
   if (isLoading || !user) {
     return (
-      <div className="min-h-screen bg-stone-950 flex flex-col items-center justify-center text-stone-300">
-        <div className="w-10 h-10 border-3 border-amber-500 border-t-transparent rounded-full animate-spin mb-4" />
-        <p className="text-sm font-medium">Đang tải dữ liệu hệ thống OrderPum...</p>
+      <div className="min-h-screen bg-stone-950 flex flex-col items-center justify-center text-stone-300 p-6 text-center">
+        <div className="w-10 h-10 border-2 border-amber-500 border-t-transparent rounded-full animate-spin mb-4" />
+        <p className="text-sm font-medium text-stone-200">Đang kết nối hệ thống OrderPum...</p>
+        {!isLoading && !token && (
+          <div className="mt-4">
+            <p className="text-xs text-stone-400 mb-3">Bạn chưa đăng nhập hoặc phiên làm việc đã hết hạn.</p>
+            <Link
+              href="/login"
+              className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-stone-950 font-semibold text-xs transition-colors shadow-md"
+            >
+              Đến trang Đăng nhập
+            </Link>
+          </div>
+        )}
       </div>
     );
   }
