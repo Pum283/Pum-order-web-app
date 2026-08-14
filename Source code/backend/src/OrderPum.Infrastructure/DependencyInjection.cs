@@ -112,6 +112,8 @@ public static class DependencyInjection
                     ALTER TABLE [MenuCategories] ADD [Code] NVARCHAR(50) NOT NULL DEFAULT '';
                 IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('MenuCategories') AND name = 'ImageUrl')
                     ALTER TABLE [MenuCategories] ADD [ImageUrl] NVARCHAR(MAX) NULL;
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('MenuCategories') AND name = 'IsActive')
+                    ALTER TABLE [MenuCategories] ADD [IsActive] BIT NOT NULL DEFAULT 1;
             END
 
             IF EXISTS (SELECT * FROM sys.tables WHERE name = 'MenuItems')
@@ -124,6 +126,8 @@ public static class DependencyInjection
                     ALTER TABLE [MenuItems] ADD [PreparationMinutes] INT NOT NULL DEFAULT 15;
                 IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('MenuItems') AND name = 'Is86ed')
                     ALTER TABLE [MenuItems] ADD [Is86ed] BIT NOT NULL DEFAULT 0;
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('MenuItems') AND name = 'IsActive')
+                    ALTER TABLE [MenuItems] ADD [IsActive] BIT NOT NULL DEFAULT 1;
             END
         ");
 
