@@ -86,7 +86,7 @@ _Chống spam chỉ với order từ khách QR + gọi NV/thanh toán._
 
 - [ ] (24) Gửi order tới bếp/NV xác nhận trước khi chế biến (chỉ order từ khách QR)
 - [ ] (27) Gọi nhân viên (realtime + số bàn)
-- [ ] (28) Gọi thanh toán
+- [ ] (28) Gọi thanh toán.
 
 ### Bước 1.9 — Thông báo realtime nhân viên
 
