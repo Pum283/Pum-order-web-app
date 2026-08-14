@@ -55,8 +55,8 @@ _Master data mặt bằng — điều kiện bắt buộc để order theo bàn.
 
 _Vận hành phục vụ tại chỗ._
 
-- [ ] (16) Sơ đồ bàn trực quan (Floor map) + trạng thái bàn
-- [ ] (17) Chuyển bàn (chuyển order + trạng thái)
+- [x] (16) Sơ đồ bàn trực quan (Floor map) + trạng thái bàn
+- [x] (17) Chuyển bàn (chuyển order + trạng thái)
 
 ### Bước 1.5 — Thực đơn cơ bản
 

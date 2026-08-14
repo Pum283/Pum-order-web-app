@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo, useRef } from "react";
+import { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import QRCode from "qrcode";
 import {
   api,
@@ -30,6 +30,12 @@ import {
   Search,
   KeyRound,
   LayoutGrid,
+  Map,
+  ArrowRightLeft,
+  Move,
+  Save,
+  Clock,
+  Coffee,
 } from "lucide-react";
 
 export default function TablesManagementPage() {
@@ -37,6 +43,10 @@ export default function TablesManagementPage() {
   const [branches, setBranches] = useState<BranchDto[]>([]);
   const [selectedBranchId, setSelectedBranchId] = useState<string>("");
   const [userRoleLevel, setUserRoleLevel] = useState<number>(5);
+
+  // View Mode: 'grid' | 'floormap'
+  const [viewMode, setViewMode] = useState<"grid" | "floormap">("grid");
+  const [isEditLayoutMode, setIsEditLayoutMode] = useState<boolean>(false);
 
   // Data states
   const [areas, setAreas] = useState<AreaDto[]>([]);
@@ -74,11 +84,20 @@ export default function TablesManagementPage() {
   const [isBatchQrModalOpen, setIsBatchQrModalOpen] = useState(false);
   const [batchQrDataUrls, setBatchQrDataUrls] = useState<Record<string, string>>({});
 
+  // Transfer Table Modal (STT 17)
+  const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
+  const [transferFromTable, setTransferFromTable] = useState<DiningTableDto | null>(null);
+  const [transferToTableId, setTransferToTableId] = useState<string>("");
+  const [transferReason, setTransferReason] = useState<string>("");
+
   // Confirm delete / action modals
   const [deleteTarget, setDeleteTarget] = useState<{ type: "area" | "table"; id: string; name: string } | null>(null);
   const [regenerateTarget, setRegenerateTarget] = useState<DiningTableDto | null>(null);
 
-  const printAreaRef = useRef<HTMLDivElement>(null);
+  // Dragging state for Floor Map
+  const [draggedTableId, setDraggedTableId] = useState<string | null>(null);
+  const [hasUnsavedPositions, setHasUnsavedPositions] = useState<boolean>(false);
+  const floorMapRef = useRef<HTMLDivElement>(null);
 
   // Load User profile & branches on init
   useEffect(() => {
@@ -113,7 +132,7 @@ export default function TablesManagementPage() {
   }, []);
 
   // Fetch areas and tables when selectedBranchId changes
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     if (!selectedBranchId) return;
     setLoading(true);
     setErrorMsg(null);
@@ -124,19 +143,20 @@ export default function TablesManagementPage() {
       ]);
       setAreas(areasRes);
       setTables(tablesRes);
+      setHasUnsavedPositions(false);
     } catch (err: unknown) {
       const error = err as { message?: string };
       setErrorMsg(error.message || "Không thể tải dữ liệu bàn và khu vực.");
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedBranchId]);
 
   useEffect(() => {
     if (selectedBranchId) {
       fetchData();
     }
-  }, [selectedBranchId]);
+  }, [selectedBranchId, fetchData]);
 
   // Generate QR code Data URL when activeQrTable changes
   useEffect(() => {
@@ -154,23 +174,6 @@ export default function TablesManagementPage() {
     }
   }, [activeQrTable]);
 
-  // Generate QR codes for Batch Print
-  useEffect(() => {
-    if (isBatchQrModalOpen) {
-      const urls: Record<string, string> = {};
-      const promises = filteredTables.map((t) =>
-        QRCode.toDataURL(t.qrUrl, {
-          width: 250,
-          margin: 1,
-          color: { dark: "#1c1917", light: "#ffffff" },
-        }).then((url) => {
-          urls[t.id] = url;
-        })
-      );
-      Promise.all(promises).then(() => setBatchQrDataUrls(urls));
-    }
-  }, [isBatchQrModalOpen, tables, selectedAreaId]);
-
   // Filtered Tables
   const filteredTables = useMemo(() => {
     return tables.filter((t) => {
@@ -187,6 +190,23 @@ export default function TablesManagementPage() {
     });
   }, [tables, selectedAreaId, statusFilter, searchKeyword]);
 
+  // Generate QR codes for Batch Print
+  useEffect(() => {
+    if (isBatchQrModalOpen && filteredTables.length > 0) {
+      const urls: Record<string, string> = {};
+      const promises = filteredTables.map((t) =>
+        QRCode.toDataURL(t.qrUrl, {
+          width: 250,
+          margin: 1,
+          color: { dark: "#1c1917", light: "#ffffff" },
+        }).then((url) => {
+          urls[t.id] = url;
+        })
+      );
+      Promise.all(promises).then(() => setBatchQrDataUrls(urls));
+    }
+  }, [isBatchQrModalOpen, filteredTables]);
+
   // Stats calculation
   const stats = useMemo(() => {
     const total = tables.length;
@@ -198,6 +218,14 @@ export default function TablesManagementPage() {
   }, [tables]);
 
   const selectedBranch = branches.find((b) => b.id === selectedBranchId);
+
+  // Available destination tables for Transfer
+  const availableTargetTables = useMemo(() => {
+    if (!transferFromTable) return [];
+    return tables.filter(
+      (t) => t.id !== transferFromTable.id && t.status === "Available"
+    );
+  }, [tables, transferFromTable]);
 
   // --- AREA HANDLERS ---
   const handleOpenCreateArea = () => {
@@ -275,8 +303,8 @@ export default function TablesManagementPage() {
       code: "",
       name: "",
       capacity: 4,
-      posX: 0,
-      posY: 0,
+      posX: 10 + (tables.length % 5) * 18,
+      posY: 10 + Math.floor(tables.length / 5) * 20,
     });
     setIsTableModalOpen(true);
   };
@@ -358,6 +386,39 @@ export default function TablesManagementPage() {
     }
   };
 
+  const handleOpenTransferModal = (table: DiningTableDto) => {
+    setTransferFromTable(table);
+    setTransferToTableId("");
+    setTransferReason("");
+    setIsTransferModalOpen(true);
+  };
+
+  const handleExecuteTransfer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!transferFromTable || !transferToTableId) {
+      setErrorMsg("Vui lòng chọn bàn đích để chuyển sang.");
+      return;
+    }
+
+    setActionLoading(true);
+    setErrorMsg(null);
+    try {
+      const res = await api.transferTable({
+        fromTableId: transferFromTable.id,
+        toTableId: transferToTableId,
+        reason: transferReason.trim() || undefined,
+      });
+      setSuccessMsg(res.message);
+      setIsTransferModalOpen(false);
+      await fetchData();
+    } catch (err: unknown) {
+      const error = err as { message?: string };
+      setErrorMsg(error.message || "Chuyển bàn thất bại.");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const handleRegenerateQr = async () => {
     if (!regenerateTarget) return;
     setActionLoading(true);
@@ -389,6 +450,50 @@ export default function TablesManagementPage() {
     } catch (err: unknown) {
       const error = err as { message?: string };
       setErrorMsg(error.message || "Không thể xóa bàn.");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // --- FLOOR MAP DRAG & DROP POSITION HANDLERS (STT 16) ---
+  const handleFloorMapDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    if (!draggedTableId || !floorMapRef.current || !isEditLayoutMode) return;
+
+    const rect = floorMapRef.current.getBoundingClientRect();
+    const clientX = e.clientX - rect.left;
+    const clientY = e.clientY - rect.top;
+
+    // Convert pixel to percentage (0 - 90%)
+    let posX = Math.round((clientX / rect.width) * 100);
+    let posY = Math.round((clientY / rect.height) * 100);
+
+    posX = Math.max(2, Math.min(88, posX));
+    posY = Math.max(2, Math.min(88, posY));
+
+    setTables((prev) =>
+      prev.map((t) => (t.id === draggedTableId ? { ...t, posX, posY } : t))
+    );
+    setHasUnsavedPositions(true);
+    setDraggedTableId(null);
+  };
+
+  const handleSaveFloorPositions = async () => {
+    setActionLoading(true);
+    setErrorMsg(null);
+    try {
+      const positions = tables.map((t) => ({
+        tableId: t.id,
+        posX: t.posX,
+        posY: t.posY,
+      }));
+      await api.updateTablePositions(positions);
+      setSuccessMsg("Đã lưu sơ đồ mặt bằng bàn thành công!");
+      setHasUnsavedPositions(false);
+      setIsEditLayoutMode(false);
+    } catch (err: unknown) {
+      const error = err as { message?: string };
+      setErrorMsg(error.message || "Không thể lưu vị trí sơ đồ bàn.");
     } finally {
       setActionLoading(false);
     }
@@ -503,19 +608,19 @@ export default function TablesManagementPage() {
             </div>
             <div>
               <div className="flex items-center gap-2.5">
-                <h1 className="text-xl font-bold text-stone-100">Khu vực, Bàn & Mã QR</h1>
+                <h1 className="text-xl font-bold text-stone-100">Khu vực, Bàn & Sơ đồ mặt bằng</h1>
                 <span className="text-xs px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-medium">
-                  STT 13, 14, 15 (MVP)
+                  STT 13, 14, 15, 16, 17 (MVP)
                 </span>
               </div>
               <p className="text-xs text-stone-400 mt-1">
-                Thiết lập mặt bằng nhà hàng, quản lý số bàn, sức chứa và xuất mã QR gọi món tại bàn
+                Sơ đồ bàn trực quan (Floor map), trạng thái phục vụ realtime, chuyển bàn và xuất mã QR gọi món
               </p>
             </div>
           </div>
         </div>
 
-        {/* Action Buttons & Branch selector */}
+        {/* Action Buttons, View Mode Switch & Branch selector */}
         <div className="flex flex-wrap items-center gap-3">
           {/* Branch selector */}
           {userRoleLevel <= 2 && branches.length > 1 && (
@@ -537,6 +642,32 @@ export default function TablesManagementPage() {
               </select>
             </div>
           )}
+
+          {/* View Mode Toggle */}
+          <div className="flex items-center bg-stone-950 p-1 rounded-xl border border-stone-800">
+            <button
+              onClick={() => setViewMode("grid")}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                viewMode === "grid"
+                  ? "bg-amber-500 text-stone-950 font-semibold shadow-md"
+                  : "text-stone-400 hover:text-stone-200"
+              }`}
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
+              <span>Dạng lưới</span>
+            </button>
+            <button
+              onClick={() => setViewMode("floormap")}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                viewMode === "floormap"
+                  ? "bg-amber-500 text-stone-950 font-semibold shadow-md"
+                  : "text-stone-400 hover:text-stone-200"
+              }`}
+            >
+              <Map className="w-3.5 h-3.5" />
+              <span>Sơ đồ tầng (STT 16)</span>
+            </button>
+          </div>
 
           <button
             onClick={() => setIsBatchQrModalOpen(true)}
@@ -658,8 +789,31 @@ export default function TablesManagementPage() {
             ))}
           </div>
 
-          {/* Search & Status Filter */}
+          {/* Search, Status Filter & Floor Map Controls */}
           <div className="flex items-center gap-2">
+            {viewMode === "floormap" && (
+              <div className="flex items-center gap-2 mr-2">
+                {isEditLayoutMode ? (
+                  <button
+                    onClick={handleSaveFloorPositions}
+                    disabled={actionLoading}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-stone-950 text-xs font-semibold shadow-md shadow-emerald-500/20"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    {actionLoading ? "Đang lưu..." : "Lưu vị trí"}
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => setIsEditLayoutMode(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-amber-400 text-xs font-medium border border-stone-700"
+                  >
+                    <Move className="w-3.5 h-3.5" />
+                    Kéo thả vị trí bàn
+                  </button>
+                )}
+              </div>
+            )}
+
             <div className="relative">
               <Search className="w-3.5 h-3.5 text-stone-400 absolute left-3 top-2.5" />
               <input
@@ -686,11 +840,11 @@ export default function TablesManagementPage() {
         </div>
       </div>
 
-      {/* Main Grid View */}
+      {/* Main Content: Floor Map or Grid */}
       {loading ? (
         <div className="flex flex-col items-center justify-center p-16 bg-stone-900/30 border border-stone-800/80 rounded-2xl">
           <RefreshCw className="w-8 h-8 text-amber-500 animate-spin mb-3" />
-          <p className="text-sm text-stone-400">Đang tải danh sách bàn và khu vực...</p>
+          <p className="text-sm text-stone-400">Đang tải danh sách bàn và sơ đồ mặt bằng...</p>
         </div>
       ) : filteredTables.length === 0 ? (
         <div className="flex flex-col items-center justify-center p-16 bg-stone-900/30 border border-stone-800/80 rounded-2xl text-center">
@@ -719,7 +873,170 @@ export default function TablesManagementPage() {
             </button>
           )}
         </div>
+      ) : viewMode === "floormap" ? (
+        /* ======================================================== */
+        /* INTERACTIVE FLOOR MAP VIEW (STT 16) */
+        /* ======================================================== */
+        <div className="space-y-3">
+          {isEditLayoutMode && (
+            <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Move className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>
+                  <strong>Chế độ chỉnh sửa sơ đồ:</strong> Bạn có thể nắm và kéo thả bất kỳ bàn nào trên mặt bằng bên dưới để sắp xếp vị trí thực tế của quán, sau đó bấm <strong>Lưu vị trí</strong>.
+                </span>
+              </div>
+              <button
+                onClick={handleSaveFloorPositions}
+                disabled={actionLoading}
+                className="px-3.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-stone-950 font-bold text-xs"
+              >
+                {actionLoading ? "Đang lưu..." : "Lưu ngay"}
+              </button>
+            </div>
+          )}
+
+          <div
+            ref={floorMapRef}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={handleFloorMapDrop}
+            className="relative w-full h-[620px] bg-stone-950/80 border-2 border-dashed border-stone-800 rounded-2xl overflow-hidden p-6 shadow-inner select-none"
+            style={{
+              backgroundImage: "radial-gradient(#292524 1px, transparent 1px)",
+              backgroundSize: "24px 24px",
+            }}
+          >
+            {/* Floor Map Legend / Status indicators */}
+            <div className="absolute top-4 left-4 z-10 flex items-center gap-3 bg-stone-900/90 border border-stone-800 px-3.5 py-2 rounded-xl backdrop-blur-md text-[11px]">
+              <span className="flex items-center gap-1 text-emerald-400">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-md shadow-emerald-500/50"></span> Trống
+              </span>
+              <span className="flex items-center gap-1 text-amber-400">
+                <span className="w-2.5 h-2.5 rounded-full bg-amber-500 shadow-md shadow-amber-500/50"></span> Có khách
+              </span>
+              <span className="flex items-center gap-1 text-blue-400">
+                <span className="w-2.5 h-2.5 rounded-full bg-blue-500 shadow-md shadow-blue-500/50"></span> Đã đặt
+              </span>
+              <span className="flex items-center gap-1 text-rose-400">
+                <span className="w-2.5 h-2.5 rounded-full bg-rose-500 shadow-md shadow-rose-500/50"></span> Cần dọn
+              </span>
+            </div>
+
+            {/* Render Floor Map Dining Tables */}
+            {filteredTables.map((table) => {
+              const statusTheme = {
+                Available: {
+                  border: "border-emerald-500/40 hover:border-emerald-500 shadow-emerald-500/10",
+                  headerBg: "bg-emerald-950/80 text-emerald-300",
+                  badge: "bg-emerald-500 text-stone-950",
+                  glow: "shadow-emerald-950/40",
+                },
+                Occupied: {
+                  border: "border-amber-500/60 hover:border-amber-500 shadow-amber-500/20",
+                  headerBg: "bg-amber-950/80 text-amber-300",
+                  badge: "bg-amber-500 text-stone-950",
+                  glow: "shadow-amber-950/60 animate-pulse",
+                },
+                Reserved: {
+                  border: "border-blue-500/40 hover:border-blue-500 shadow-blue-500/10",
+                  headerBg: "bg-blue-950/80 text-blue-300",
+                  badge: "bg-blue-500 text-stone-950",
+                  glow: "shadow-blue-950/40",
+                },
+                NeedsCleaning: {
+                  border: "border-rose-500/40 hover:border-rose-500 shadow-rose-500/10",
+                  headerBg: "bg-rose-950/80 text-rose-300",
+                  badge: "bg-rose-500 text-white",
+                  glow: "shadow-rose-950/40",
+                },
+              }[table.status] || {
+                border: "border-stone-700",
+                headerBg: "bg-stone-800 text-stone-300",
+                badge: "bg-stone-600 text-white",
+                glow: "",
+              };
+
+              return (
+                <div
+                  key={table.id}
+                  draggable={isEditLayoutMode}
+                  onDragStart={() => setDraggedTableId(table.id)}
+                  style={{
+                    left: `${table.posX}%`,
+                    top: `${table.posY}%`,
+                  }}
+                  className={`absolute w-36 bg-stone-900 border-2 ${statusTheme.border} ${statusTheme.glow} rounded-2xl shadow-xl transition-transform duration-100 flex flex-col justify-between overflow-hidden ${
+                    isEditLayoutMode ? "cursor-move ring-2 ring-amber-500/50" : "cursor-pointer hover:scale-105"
+                  }`}
+                >
+                  {/* Table Card Header on Map */}
+                  <div className={`px-2.5 py-1.5 ${statusTheme.headerBg} flex items-center justify-between border-b border-stone-800/80`}>
+                    <span className="font-black text-xs font-mono">{table.code}</span>
+                    <span className="text-[10px] px-1.5 py-0.2 rounded-full font-bold flex items-center gap-1">
+                      <Users className="w-2.5 h-2.5" />
+                      {table.capacity}
+                    </span>
+                  </div>
+
+                  {/* Body Info */}
+                  <div className="p-2 text-center">
+                    <div className="text-[11px] font-bold text-stone-200 truncate">
+                      {table.name || table.code}
+                    </div>
+                    <div className="text-[9px] text-stone-400 truncate">{table.areaName}</div>
+
+                    {/* Quick action buttons in Map view */}
+                    <div className="mt-2 flex items-center justify-center gap-1 pt-1.5 border-t border-stone-800/60">
+                      {table.status === "Occupied" ? (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenTransferModal(table);
+                          }}
+                          title="Chuyển bàn này (STT 17)"
+                          className="px-2 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 text-[10px] font-bold flex items-center gap-1 border border-amber-500/30"
+                        >
+                          <ArrowRightLeft className="w-3 h-3" />
+                          <span>Chuyển</span>
+                        </button>
+                      ) : (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveQrTable(table);
+                            setIsQrModalOpen(true);
+                          }}
+                          title="Xem mã QR bàn"
+                          className="p-1 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-300 text-[10px]"
+                        >
+                          <QrCode className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+
+                      <select
+                        value={table.status}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          handleQuickStatusChange(table.id, e.target.value);
+                        }}
+                        className="bg-stone-950 text-[10px] border border-stone-800 rounded-lg px-1 py-0.5 text-stone-300 focus:outline-none"
+                      >
+                        <option value="Available">Trống</option>
+                        <option value="Occupied">Khách</option>
+                        <option value="Reserved">Đặt</option>
+                        <option value="NeedsCleaning">Dọn</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       ) : (
+        /* ======================================================== */
+        /* GRID CARDS VIEW (STT 14) */
+        /* ======================================================== */
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {filteredTables.map((table) => {
             const statusConfig = {
@@ -789,23 +1106,44 @@ export default function TablesManagementPage() {
                       <span>{table.capacity} khách</span>
                     </div>
                     <div className="text-[11px] text-stone-500 font-mono">
-                      Vị trí: ({table.posX}, {table.posY})
+                      Vị trí: ({table.posX}%, {table.posY}%)
                     </div>
                   </div>
                 </div>
 
                 {/* Bottom Actions */}
                 <div className="mt-4 pt-2 flex items-center justify-between gap-1 text-xs">
-                  {/* View QR Button */}
+                  {/* Transfer Button (STT 17) */}
+                  {table.status === "Occupied" ? (
+                    <button
+                      onClick={() => handleOpenTransferModal(table)}
+                      className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-stone-950 font-bold transition-colors shadow-sm"
+                    >
+                      <ArrowRightLeft className="w-3.5 h-3.5" />
+                      <span>Chuyển bàn</span>
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        setActiveQrTable(table);
+                        setIsQrModalOpen(true);
+                      }}
+                      className="flex-1 flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/20 font-medium transition-colors"
+                    >
+                      <QrCode className="w-3.5 h-3.5" />
+                      <span>Xem QR</span>
+                    </button>
+                  )}
+
                   <button
                     onClick={() => {
                       setActiveQrTable(table);
                       setIsQrModalOpen(true);
                     }}
-                    className="flex-1 flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/20 font-medium transition-colors"
+                    title="Xem mã QR"
+                    className="p-1.5 rounded-lg text-stone-400 hover:text-amber-400 hover:bg-stone-800 transition-colors"
                   >
-                    <QrCode className="w-3.5 h-3.5" />
-                    <span>Xem QR</span>
+                    <QrCode className="w-4 h-4" />
                   </button>
 
                   <button
@@ -839,7 +1177,105 @@ export default function TablesManagementPage() {
       )}
 
       {/* ======================================================== */}
-      {/* MODAL 1: CREATE / EDIT AREA (STT 13) */}
+      {/* MODAL: TRANSFER TABLE MODAL (STT 17) */}
+      {/* ======================================================== */}
+      {isTransferModalOpen && transferFromTable && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-950/85 backdrop-blur-sm p-4 animate-in fade-in duration-150">
+          <div className="bg-stone-900 border border-stone-800 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden">
+            <div className="flex items-center justify-between p-5 border-b border-stone-800">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                  <ArrowRightLeft className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-stone-100">Chuyển Bàn (STT 17)</h3>
+                  <p className="text-xs text-stone-400">Chuyển toàn bộ order và phiên phục vụ sang bàn mới</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsTransferModalOpen(false)}
+                className="p-1.5 rounded-lg text-stone-400 hover:text-stone-200 hover:bg-stone-800"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleExecuteTransfer} className="p-5 space-y-4">
+              {/* From Table Info */}
+              <div className="p-3.5 rounded-xl bg-stone-950 border border-stone-800">
+                <div className="text-[11px] font-semibold text-stone-400 uppercase tracking-wider">Bàn nguồn hiện tại</div>
+                <div className="flex items-center justify-between mt-1">
+                  <div className="text-base font-black text-amber-400">{transferFromTable.code} - {transferFromTable.name}</div>
+                  <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-bold">
+                    Đang phục vụ
+                  </span>
+                </div>
+                <div className="text-xs text-stone-400 mt-0.5">{transferFromTable.areaName} • Sức chứa {transferFromTable.capacity} khách</div>
+              </div>
+
+              {/* To Table Selection */}
+              <div>
+                <label className="block text-xs font-semibold text-stone-300 mb-1.5">
+                  Chọn bàn đích chuyển sang (Chỉ bàn đang trống) <span className="text-rose-400">*</span>
+                </label>
+                {availableTargetTables.length === 0 ? (
+                  <div className="p-3 rounded-xl bg-rose-950/40 border border-rose-500/30 text-rose-300 text-xs">
+                    Hiện tại không có bàn trống nào trong chi nhánh để chuyển!
+                  </div>
+                ) : (
+                  <select
+                    required
+                    value={transferToTableId}
+                    onChange={(e) => setTransferToTableId(e.target.value)}
+                    className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3.5 py-2.5 text-sm text-stone-100 focus:outline-none focus:border-amber-500"
+                  >
+                    <option value="">-- Chọn bàn đích --</option>
+                    {availableTargetTables.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.code} ({t.name}) — {t.areaName} (Sức chứa: {t.capacity} khách)
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              {/* Reason */}
+              <div>
+                <label className="block text-xs font-semibold text-stone-300 mb-1.5">
+                  Lý do chuyển bàn (tùy chọn)
+                </label>
+                <input
+                  type="text"
+                  placeholder="VD: Khách đổi sang phòng máy lạnh, ghép thêm bạn bè..."
+                  value={transferReason}
+                  onChange={(e) => setTransferReason(e.target.value)}
+                  className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3.5 py-2.5 text-sm text-stone-100 focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-stone-800">
+                <button
+                  type="button"
+                  onClick={() => setIsTransferModalOpen(false)}
+                  className="px-4 py-2 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-300 text-xs font-medium"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  disabled={actionLoading || availableTargetTables.length === 0 || !transferToTableId}
+                  className="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-stone-950 text-xs font-semibold shadow-lg shadow-amber-500/20 disabled:opacity-50"
+                >
+                  {actionLoading ? "Đang chuyển..." : "Xác nhận Chuyển Bàn"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* MODAL: CREATE / EDIT AREA (STT 13) */}
       {/* ======================================================== */}
       {isAreaModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-950/80 backdrop-blur-sm p-4 animate-in fade-in duration-150">
@@ -915,7 +1351,7 @@ export default function TablesManagementPage() {
       )}
 
       {/* ======================================================== */}
-      {/* MODAL 2: CREATE / EDIT DINING TABLE (STT 14) */}
+      {/* MODAL: CREATE / EDIT DINING TABLE (STT 14) */}
       {/* ======================================================== */}
       {isTableModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-950/80 backdrop-blur-sm p-4 animate-in fade-in duration-150">
@@ -1004,7 +1440,7 @@ export default function TablesManagementPage() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-stone-300 mb-1.5">Tọa độ X (Floor Map)</label>
+                  <label className="block text-xs font-semibold text-stone-300 mb-1.5">Tọa độ X (Floor Map %)</label>
                   <input
                     type="number"
                     value={tableFormData.posX}
@@ -1013,7 +1449,7 @@ export default function TablesManagementPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-stone-300 mb-1.5">Tọa độ Y (Floor Map)</label>
+                  <label className="block text-xs font-semibold text-stone-300 mb-1.5">Tọa độ Y (Floor Map %)</label>
                   <input
                     type="number"
                     value={tableFormData.posY}
@@ -1045,7 +1481,7 @@ export default function TablesManagementPage() {
       )}
 
       {/* ======================================================== */}
-      {/* MODAL 3: VIEW & PRINT SINGLE QR TEMPLATE (STT 15) */}
+      {/* MODAL: VIEW & PRINT SINGLE QR TEMPLATE (STT 15) */}
       {/* ======================================================== */}
       {isQrModalOpen && activeQrTable && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-950/85 backdrop-blur-sm p-4 animate-in fade-in duration-150">
@@ -1135,7 +1571,7 @@ export default function TablesManagementPage() {
       )}
 
       {/* ======================================================== */}
-      {/* MODAL 4: BATCH QR PRINT MODAL (STT 15) */}
+      {/* MODAL: BATCH QR PRINT MODAL (STT 15) */}
       {/* ======================================================== */}
       {isBatchQrModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-950/90 backdrop-blur-sm p-4 animate-in fade-in duration-150">
@@ -1170,10 +1606,7 @@ export default function TablesManagementPage() {
             </div>
 
             {/* Batch Grid Container */}
-            <div
-              ref={printAreaRef}
-              className="p-6 overflow-y-auto bg-stone-950/60 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6"
-            >
+            <div className="p-6 overflow-y-auto bg-stone-950/60 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
               {filteredTables.map((t) => (
                 <div
                   key={t.id}
@@ -1206,7 +1639,7 @@ export default function TablesManagementPage() {
       )}
 
       {/* ======================================================== */}
-      {/* MODAL 5: CONFIRM REGENERATE QR TOKEN */}
+      {/* MODAL: CONFIRM REGENERATE QR TOKEN */}
       {/* ======================================================== */}
       {regenerateTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-950/80 backdrop-blur-sm p-4 animate-in fade-in duration-150">
@@ -1244,7 +1677,7 @@ export default function TablesManagementPage() {
       )}
 
       {/* ======================================================== */}
-      {/* MODAL 6: CONFIRM DELETE MODAL */}
+      {/* MODAL: CONFIRM DELETE MODAL */}
       {/* ======================================================== */}
       {deleteTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-950/80 backdrop-blur-sm p-4 animate-in fade-in duration-150">

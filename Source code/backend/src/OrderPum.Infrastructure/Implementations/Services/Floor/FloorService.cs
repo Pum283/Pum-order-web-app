@@ -554,4 +554,108 @@ public class FloorService(AppDbContext dbContext) : IFloorService
         await dbContext.SaveChangesAsync();
         return true;
     }
+
+    // ==========================================
+    // FLOOR MAP & TABLE TRANSFER (STT 16, 17)
+    // ==========================================
+
+    public async Task<bool> BatchUpdatePositionsAsync(BatchUpdateTablePositionsRequest request, int userLevel, Guid? userBranchId)
+    {
+        if (request.Positions == null || request.Positions.Count == 0) return true;
+
+        var tableIds = request.Positions.Select(p => p.TableId).ToList();
+        var tables = await dbContext.Tables.Where(t => tableIds.Contains(t.Id) && !t.IsDeleted).ToListAsync();
+
+        foreach (var pos in request.Positions)
+        {
+            var table = tables.FirstOrDefault(t => t.Id == pos.TableId);
+            if (table != null)
+            {
+                ValidateBranchAccess(table.BranchId, userLevel, userBranchId);
+                table.PosX = pos.PosX;
+                table.PosY = pos.PosY;
+                table.UpdatedAt = DateTime.UtcNow;
+            }
+        }
+
+        await dbContext.SaveChangesAsync();
+        return true;
+    }
+
+    public async Task<TransferTableResultDto> TransferTableAsync(TransferTableRequest request, int userLevel, Guid? userBranchId)
+    {
+        if (request.FromTableId == request.ToTableId)
+        {
+            throw new InvalidOperationException("Bàn đích không thể trùng với bàn nguồn.");
+        }
+
+        var fromTable = await dbContext.Tables.FirstOrDefaultAsync(t => t.Id == request.FromTableId && !t.IsDeleted);
+        if (fromTable == null)
+        {
+            throw new KeyNotFoundException("Không tìm thấy bàn nguồn.");
+        }
+
+        ValidateBranchAccess(fromTable.BranchId, userLevel, userBranchId);
+
+        var toTable = await dbContext.Tables.FirstOrDefaultAsync(t => t.Id == request.ToTableId && !t.IsDeleted);
+        if (toTable == null)
+        {
+            throw new KeyNotFoundException("Không tìm thấy bàn đích.");
+        }
+
+        if (fromTable.BranchId != toTable.BranchId)
+        {
+            throw new InvalidOperationException("Chỉ có thể chuyển bàn trong cùng một chi nhánh.");
+        }
+
+        if (toTable.Status == "Occupied")
+        {
+            throw new InvalidOperationException($"Bàn đích '{toTable.Code}' hiện đang có khách. Không thể chuyển vào bàn đang phục vụ.");
+        }
+
+        // Tìm phiên bàn đang hoạt động của bàn nguồn
+        var activeSession = await dbContext.TableSessions
+            .FirstOrDefaultAsync(s => s.TableId == request.FromTableId && s.ClosedAt == null);
+
+        if (activeSession == null)
+        {
+            fromTable.Status = "Available";
+            toTable.Status = "Occupied";
+            fromTable.UpdatedAt = DateTime.UtcNow;
+            toTable.UpdatedAt = DateTime.UtcNow;
+
+            await dbContext.SaveChangesAsync();
+
+            return new TransferTableResultDto
+            {
+                FromTableId = fromTable.Id,
+                FromTableCode = fromTable.Code,
+                ToTableId = toTable.Id,
+                ToTableCode = toTable.Code,
+                SessionId = Guid.Empty,
+                Message = $"Đã chuyển trạng thái phục vụ từ bàn {fromTable.Code} sang bàn {toTable.Code} thành công."
+            };
+        }
+
+        // Chuyển session sang bàn đích
+        activeSession.TableId = toTable.Id;
+        activeSession.UpdatedAt = DateTime.UtcNow;
+
+        fromTable.Status = "Available";
+        toTable.Status = "Occupied";
+        fromTable.UpdatedAt = DateTime.UtcNow;
+        toTable.UpdatedAt = DateTime.UtcNow;
+
+        await dbContext.SaveChangesAsync();
+
+        return new TransferTableResultDto
+        {
+            FromTableId = fromTable.Id,
+            FromTableCode = fromTable.Code,
+            ToTableId = toTable.Id,
+            ToTableCode = toTable.Code,
+            SessionId = activeSession.Id,
+            Message = $"Đã chuyển toàn bộ order từ bàn {fromTable.Code} sang bàn {toTable.Code} thành công."
+        };
+    }
 }

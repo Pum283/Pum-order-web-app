@@ -188,6 +188,48 @@ public class TablesController(IFloorService floorService, IConfiguration config)
         }
     }
 
+    [HttpPost("transfer")]
+    public async Task<IActionResult> TransferTable([FromBody] TransferTableRequest request)
+    {
+        var (level, userBranchId) = GetActorContext();
+        try
+        {
+            var result = await floorService.TransferTableAsync(request, level, userBranchId);
+            return Ok(result);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(403, new { message = ex.Message });
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpPost("positions")]
+    public async Task<IActionResult> UpdatePositions([FromBody] BatchUpdateTablePositionsRequest request)
+    {
+        var (level, userBranchId) = GetActorContext();
+        try
+        {
+            var success = await floorService.BatchUpdatePositionsAsync(request, level, userBranchId);
+            return Ok(new { success, message = "Đã lưu vị trí sơ đồ bàn thành công." });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(403, new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> DeleteTable(Guid id)
     {

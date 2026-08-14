@@ -421,6 +421,16 @@ export const api = {
     request<DiningTableDto>(`/api/tables/${id}/regenerate-qr`, {
       method: "POST",
     }),
+  transferTable: (data: { fromTableId: string; toTableId: string; reason?: string }) =>
+    request<{ fromTableId: string; fromTableCode: string; toTableId: string; toTableCode: string; sessionId: string; message: string }>("/api/tables/transfer", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  updateTablePositions: (positions: { tableId: string; posX: number; posY: number }[]) =>
+    request<{ success: boolean; message: string }>("/api/tables/positions", {
+      method: "POST",
+      body: JSON.stringify({ positions }),
+    }),
   deleteTable: (id: string) =>
     request<{ message: string }>(`/api/tables/${id}`, {
       method: "DELETE",

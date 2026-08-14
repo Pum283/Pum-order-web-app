@@ -57,6 +57,12 @@ public class DiningTableDto
     public int PosY { get; set; }
     public bool IsActive { get; set; }
     public DateTime CreatedAt { get; set; }
+
+    // Active session info for Floor Map (STT 16)
+    public Guid? ActiveSessionId { get; set; }
+    public DateTime? ActiveSessionOpenedAt { get; set; }
+    public int ActiveSessionItemCount { get; set; }
+    public decimal ActiveSessionTotalAmount { get; set; }
 }
 
 public class CreateTableRequest
@@ -106,4 +112,39 @@ public class UpdateTableStatusRequest
 {
     [Required(ErrorMessage = "Trạng thái bàn không được để trống")]
     public string Status { get; set; } = "Available"; // Available, Occupied, Reserved, NeedsCleaning
+}
+
+public class UpdateTablePositionRequest
+{
+    public Guid TableId { get; set; }
+    public int PosX { get; set; }
+    public int PosY { get; set; }
+}
+
+public class BatchUpdateTablePositionsRequest
+{
+    [Required]
+    public List<UpdateTablePositionRequest> Positions { get; set; } = [];
+}
+
+public class TransferTableRequest
+{
+    [Required(ErrorMessage = "Bàn nguồn không được để trống")]
+    public Guid FromTableId { get; set; }
+
+    [Required(ErrorMessage = "Bàn đích không được để trống")]
+    public Guid ToTableId { get; set; }
+
+    [MaxLength(300, ErrorMessage = "Ghi chú chuyển bàn tối đa 300 ký tự")]
+    public string? Reason { get; set; }
+}
+
+public class TransferTableResultDto
+{
+    public Guid FromTableId { get; set; }
+    public string FromTableCode { get; set; } = string.Empty;
+    public Guid ToTableId { get; set; }
+    public string ToTableCode { get; set; } = string.Empty;
+    public Guid SessionId { get; set; }
+    public string Message { get; set; } = string.Empty;
 }

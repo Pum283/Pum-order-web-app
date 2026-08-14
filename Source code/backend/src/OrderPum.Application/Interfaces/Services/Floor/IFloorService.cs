@@ -4,14 +4,14 @@ namespace OrderPum.Application.Interfaces.Services.Floor;
 
 public interface IFloorService
 {
-    // Area operations
+    // Area operations (STT 13)
     Task<List<AreaDto>> GetAreasByBranchAsync(Guid branchId, int userLevel, Guid? userBranchId);
     Task<AreaDto?> GetAreaByIdAsync(Guid id, int userLevel, Guid? userBranchId);
     Task<AreaDto> CreateAreaAsync(CreateAreaRequest request, int userLevel, Guid? userBranchId);
     Task<AreaDto> UpdateAreaAsync(Guid id, UpdateAreaRequest request, int userLevel, Guid? userBranchId);
     Task<bool> DeleteAreaAsync(Guid id, int userLevel, Guid? userBranchId);
 
-    // Table operations
+    // Table & QR operations (STT 14, 15)
     Task<List<DiningTableDto>> GetTablesByBranchAsync(Guid branchId, Guid? areaId, int userLevel, Guid? userBranchId, string baseUrl = "http://localhost:1212");
     Task<DiningTableDto?> GetTableByIdAsync(Guid id, int userLevel, Guid? userBranchId, string baseUrl = "http://localhost:1212");
     Task<DiningTableDto?> GetTableByQrTokenAsync(string qrToken, string baseUrl = "http://localhost:1212");
@@ -20,4 +20,8 @@ public interface IFloorService
     Task<DiningTableDto> UpdateTableStatusAsync(Guid id, string status, int userLevel, Guid? userBranchId, string baseUrl = "http://localhost:1212");
     Task<DiningTableDto> RegenerateQrTokenAsync(Guid id, int userLevel, Guid? userBranchId, string baseUrl = "http://localhost:1212");
     Task<bool> DeleteTableAsync(Guid id, int userLevel, Guid? userBranchId);
+
+    // Floor Map & Table Transfer (STT 16, 17)
+    Task<bool> BatchUpdatePositionsAsync(BatchUpdateTablePositionsRequest request, int userLevel, Guid? userBranchId);
+    Task<TransferTableResultDto> TransferTableAsync(TransferTableRequest request, int userLevel, Guid? userBranchId);
 }
