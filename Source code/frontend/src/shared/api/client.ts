@@ -218,6 +218,133 @@ export type UpdateTableRequest = {
   isActive: boolean;
 };
 
+// ==========================================
+// MENU TYPES (STT 34, 35, 36)
+// ==========================================
+
+export type MenuCategoryDto = {
+  id: string;
+  branchId: string;
+  branchName: string;
+  code: string;
+  name: string;
+  imageUrl?: string;
+  sortOrder: number;
+  isActive: boolean;
+  itemCount: number;
+  createdAt: string;
+};
+
+export type CreateCategoryRequest = {
+  branchId: string;
+  code?: string;
+  name: string;
+  imageUrl?: string;
+  sortOrder?: number;
+};
+
+export type UpdateCategoryRequest = {
+  code?: string;
+  name: string;
+  imageUrl?: string;
+  sortOrder?: number;
+  isActive: boolean;
+};
+
+export type MenuItemOptionValueDto = {
+  id: string;
+  optionId: string;
+  name: string;
+  extraPrice: number;
+  isDefault: boolean;
+  isAvailable: boolean;
+  sortOrder: number;
+};
+
+export type CreateOptionValueRequest = {
+  id?: string;
+  name: string;
+  extraPrice: number;
+  isDefault?: boolean;
+  isAvailable?: boolean;
+  sortOrder?: number;
+};
+
+export type MenuItemOptionDto = {
+  id: string;
+  menuItemId: string;
+  name: string;
+  optionType: "Single" | "Multiple";
+  isRequired: boolean;
+  sortOrder: number;
+  values: MenuItemOptionValueDto[];
+};
+
+export type CreateOptionRequest = {
+  id?: string;
+  name: string;
+  optionType: "Single" | "Multiple";
+  isRequired?: boolean;
+  sortOrder?: number;
+  values: CreateOptionValueRequest[];
+};
+
+export type MenuItemDto = {
+  id: string;
+  branchId: string;
+  branchName: string;
+  categoryId: string;
+  categoryName: string;
+  code: string;
+  name: string;
+  description?: string;
+  imageUrl?: string;
+  price: number;
+  unit: string;
+  kitchenStation: string;
+  preparationMinutes: number;
+  isAvailable: boolean;
+  is86ed: boolean;
+  isActive: boolean;
+  optionCount: number;
+  createdAt: string;
+};
+
+export type MenuItemDetailDto = MenuItemDto & {
+  options: MenuItemOptionDto[];
+};
+
+export type CreateMenuItemRequest = {
+  branchId: string;
+  categoryId: string;
+  code: string;
+  name: string;
+  description?: string;
+  imageUrl?: string;
+  price: number;
+  unit?: string;
+  kitchenStation?: string;
+  preparationMinutes?: number;
+  isAvailable?: boolean;
+  options?: CreateOptionRequest[];
+};
+
+export type UpdateMenuItemRequest = {
+  categoryId: string;
+  code: string;
+  name: string;
+  description?: string;
+  imageUrl?: string;
+  price: number;
+  unit?: string;
+  kitchenStation?: string;
+  preparationMinutes?: number;
+  isAvailable?: boolean;
+  is86ed?: boolean;
+  isActive?: boolean;
+  options?: CreateOptionRequest[];
+};
+
 function getAuthToken(): string | null {
   if (typeof window === "undefined") return null;
   return localStorage.getItem("orderpum_token");
@@ -433,6 +560,65 @@ export const api = {
     }),
   deleteTable: (id: string) =>
     request<{ message: string }>(`/api/tables/${id}`, {
+      method: "DELETE",
+    }),
+
+  // ==========================================
+  // CATEGORIES (STT 34)
+  // ==========================================
+  getCategories: (branchId: string, onlyActive = false) =>
+    request<MenuCategoryDto[]>(`/api/categories?branchId=${branchId}&onlyActive=${onlyActive}`),
+  getCategoryById: (id: string) =>
+    request<MenuCategoryDto>(`/api/categories/${id}`),
+  createCategory: (data: CreateCategoryRequest) =>
+    request<MenuCategoryDto>("/api/categories", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  updateCategory: (id: string, data: UpdateCategoryRequest) =>
+    request<MenuCategoryDto>(`/api/categories/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+  deleteCategory: (id: string) =>
+    request<{ message: string }>(`/api/categories/${id}`, {
+      method: "DELETE",
+    }),
+
+  // ==========================================
+  // MENU ITEMS (STT 35, 36)
+  // ==========================================
+  getMenuItems: (branchId: string, categoryId?: string, search?: string, onlyAvailable = false) => {
+    const params = new URLSearchParams({ branchId });
+    if (categoryId && categoryId !== "ALL") params.append("categoryId", categoryId);
+    if (search) params.append("search", search);
+    if (onlyAvailable) params.append("onlyAvailable", "true");
+    return request<MenuItemDto[]>(`/api/menuitems?${params.toString()}`);
+  },
+  getMenuItemById: (id: string) =>
+    request<MenuItemDetailDto>(`/api/menuitems/${id}`),
+  createMenuItem: (data: CreateMenuItemRequest) =>
+    request<MenuItemDetailDto>("/api/menuitems", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  updateMenuItem: (id: string, data: UpdateMenuItemRequest) =>
+    request<MenuItemDetailDto>(`/api/menuitems/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+  toggleMenuItemAvailability: (id: string, isAvailable: boolean) =>
+    request<{ success: boolean; isAvailable: boolean; message: string }>(`/api/menuitems/${id}/availability`, {
+      method: "PATCH",
+      body: JSON.stringify({ isAvailable }),
+    }),
+  toggleMenuItem86: (id: string, is86ed: boolean) =>
+    request<{ success: boolean; is86ed: boolean; message: string }>(`/api/menuitems/${id}/86`, {
+      method: "PATCH",
+      body: JSON.stringify({ is86ed }),
+    }),
+  deleteMenuItem: (id: string) =>
+    request<{ message: string }>(`/api/menuitems/${id}`, {
       method: "DELETE",
     }),
 

@@ -62,9 +62,9 @@ _Vận hành phục vụ tại chỗ._
 
 _Menu bán được trên App NV, QR và POS._
 
-- [ ] (34) CRUD danh mục món ăn
-- [ ] (35) CRUD món ăn/sản phẩm (tên, ảnh, giá, trạng thái bán)
-- [ ] (36) Biến thể món (size, topping, mức độ + cộng giá)
+- [x] (34) CRUD danh mục món ăn
+- [x] (35) CRUD món ăn/sản phẩm (tên, ảnh, giá, trạng thái bán)
+- [x] (36) Biến thể món (size, topping, mức độ + cộng giá)
 
 ### Bước 1.6 — Nhân viên order hộ tại bàn
 

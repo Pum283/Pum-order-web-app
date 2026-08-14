@@ -6,14 +6,17 @@ using Microsoft.IdentityModel.Tokens;
 using OrderPum.Application.Interfaces.Services.Auth;
 using OrderPum.Application.Interfaces.Services.Branch;
 using OrderPum.Application.Interfaces.Services.Floor;
+using OrderPum.Application.Interfaces.Services.Menu;
 using OrderPum.Application.Interfaces.Services.Order;
 using OrderPum.Domain.Entities.Auth;
 using OrderPum.Domain.Entities.Branch;
 using OrderPum.Domain.Entities.Floor;
+using OrderPum.Domain.Entities.Menu;
 using OrderPum.Domain.Enums.Auth;
 using OrderPum.Infrastructure.Implementations.Services.Auth;
 using OrderPum.Infrastructure.Implementations.Services.Branch;
 using OrderPum.Infrastructure.Implementations.Services.Floor;
+using OrderPum.Infrastructure.Implementations.Services.Menu;
 using OrderPum.Infrastructure.Implementations.Services.Order;
 using OrderPum.Infrastructure.Persistence;
 using OrderPum.Infrastructure.Security;
@@ -35,6 +38,7 @@ public static class DependencyInjection
         services.AddScoped<IRoleService, RoleService>();
         services.AddScoped<IBranchService, BranchService>();
         services.AddScoped<IFloorService, FloorService>();
+        services.AddScoped<IMenuService, MenuService>();
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IOrderService, OrderService>();
 
@@ -66,7 +70,7 @@ public static class DependencyInjection
         // Tự động tạo cơ sở dữ liệu và bảng nếu chưa tồn tại
         await db.Database.EnsureCreatedAsync();
 
-        // Tự động cập nhật cột mới nếu bảng Branches, Areas, Tables đã tồn tại từ trước
+        // Tự động cập nhật cột mới nếu bảng Branches, Areas, Tables, MenuCategories, MenuItems đã tồn tại từ trước
         await db.Database.ExecuteSqlRawAsync(@"
             IF EXISTS (SELECT * FROM sys.tables WHERE name = 'Branches')
             BEGIN
@@ -100,6 +104,26 @@ public static class DependencyInjection
                     ALTER TABLE [Tables] ADD [PosY] INT NOT NULL DEFAULT 0;
                 IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Tables') AND name = 'IsActive')
                     ALTER TABLE [Tables] ADD [IsActive] BIT NOT NULL DEFAULT 1;
+            END
+
+            IF EXISTS (SELECT * FROM sys.tables WHERE name = 'MenuCategories')
+            BEGIN
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('MenuCategories') AND name = 'Code')
+                    ALTER TABLE [MenuCategories] ADD [Code] NVARCHAR(50) NOT NULL DEFAULT '';
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('MenuCategories') AND name = 'ImageUrl')
+                    ALTER TABLE [MenuCategories] ADD [ImageUrl] NVARCHAR(MAX) NULL;
+            END
+
+            IF EXISTS (SELECT * FROM sys.tables WHERE name = 'MenuItems')
+            BEGIN
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('MenuItems') AND name = 'Code')
+                    ALTER TABLE [MenuItems] ADD [Code] NVARCHAR(50) NOT NULL DEFAULT '';
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('MenuItems') AND name = 'KitchenStation')
+                    ALTER TABLE [MenuItems] ADD [KitchenStation] NVARCHAR(50) NOT NULL DEFAULT 'Kitchen';
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('MenuItems') AND name = 'PreparationMinutes')
+                    ALTER TABLE [MenuItems] ADD [PreparationMinutes] INT NOT NULL DEFAULT 15;
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('MenuItems') AND name = 'Is86ed')
+                    ALTER TABLE [MenuItems] ADD [Is86ed] BIT NOT NULL DEFAULT 0;
             END
         ");
 
@@ -138,30 +162,40 @@ public static class DependencyInjection
             },
             new()
             {
-                Code = "DepartmentLead",
-                Name = "Trưởng bộ phận",
+                Code = "ShiftLeader",
+                Name = "Trưởng ca",
                 Level = 4,
-                Description = "Trưởng bếp, Bar trưởng, Giám sát sảnh phục vụ",
+                Description = "Điều phối phục vụ, giám sát bếp/bar và hỗ trợ thanh toán",
                 IsSystem = true,
                 IsActive = true,
                 CreatedAt = DateTime.UtcNow
             },
             new()
             {
-                Code = "FullTimeStaff",
-                Name = "Nhân viên chính thức",
+                Code = "WaitStaff",
+                Name = "Nhân viên phục vụ",
                 Level = 5,
-                Description = "Nhân viên phục vụ tại bàn, thu ngân, tiếp thực chính thức",
+                Description = "Order tại bàn, phục vụ món ăn và hỗ trợ khách hàng",
                 IsSystem = true,
                 IsActive = true,
                 CreatedAt = DateTime.UtcNow
             },
             new()
             {
-                Code = "ProbationStaff",
-                Name = "Nhân viên thử việc",
+                Code = "Cashier",
+                Name = "Thu ngân",
                 Level = 6,
-                Description = "Nhân viên mới, nhân viên part-time thử việc",
+                Description = "Tiếp nhận thanh toán, in hóa đơn và đối soát ca thu",
+                IsSystem = true,
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow
+            },
+            new()
+            {
+                Code = "Chef",
+                Name = "Bếp trưởng / Pha chế",
+                Level = 6,
+                Description = "Tiếp nhận chế biến món ăn trên màn hình KDS",
                 IsSystem = true,
                 IsActive = true,
                 CreatedAt = DateTime.UtcNow
@@ -170,212 +204,134 @@ public static class DependencyInjection
 
         foreach (var r in systemRoles)
         {
-            var existingRole = await db.Roles.FirstOrDefaultAsync(x => x.Code == r.Code);
-            if (existingRole == null)
+            var existing = await db.Roles.FirstOrDefaultAsync(x => x.Code == r.Code);
+            if (existing == null)
             {
                 db.Roles.Add(r);
             }
             else
             {
-                existingRole.Name = r.Name;
-                existingRole.Level = r.Level;
-                existingRole.Description = r.Description;
-                existingRole.IsSystem = true;
+                existing.Name = r.Name;
+                existing.Level = r.Level;
+                existing.Description = r.Description;
+                existing.IsSystem = true;
+                existing.IsActive = true;
             }
         }
         await db.SaveChangesAsync();
 
-        var roleMap = await db.Roles.ToDictionaryAsync(r => r.Code, r => r);
-
-        // 2. Seed Chi nhánh mẫu với cấu hình tài chính chuẩn
-        Branch branchQ1;
-        Branch branchHN;
-
-        var existingBranches = await db.Branches.OrderBy(b => b.CreatedAt).ToListAsync();
-        if (existingBranches.Count == 0)
+        // 2. Seed Chi nhánh mẫu (Branches)
+        var branchQ1 = await db.Branches.FirstOrDefaultAsync(b => b.Code == "CN01");
+        if (branchQ1 == null)
         {
             branchQ1 = new Branch
             {
                 Id = Guid.NewGuid(),
                 Code = "CN01",
-                Name = "Chi nhánh 1 - Bến Nghé, Quận 1 (TP.HCM)",
-                Address = "Số 12 Lê Lợi, Phường Bến Nghé, Quận 1, TP. Hồ Chí Minh",
-                Phone = "028 3822 1234",
-                OpenHours = "08:00 - 22:30",
-                TaxRatePercent = 8,
-                ServiceChargePercent = 5,
+                Name = "OrderPum - Quận 1 (Flagship)",
+                Address = "123 Đường Nguyễn Huệ, Phường Bến Nghé, Quận 1, TP. Hồ Chí Minh",
+                Phone = "0901234567",
+                OpenHours = "08:00 - 23:00",
+                ImageUrl = "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=800&q=80",
+                TaxRatePercent = 8.00m,
+                ServiceChargePercent = 5.00m,
                 Currency = "VND",
                 IsTaxIncludedInPrice = false,
                 IsServiceChargeIncluded = false,
-                ReceiptHeaderNote = "OrderPum Bến Nghé - Chúc quý khách ngon miệng!",
+                ReceiptHeaderNote = "CHÀO MỪNG QUÝ KHÁCH ĐẾN VỚI ORDERPUM FLAGSHIP",
                 ReceiptFooterNote = "Cảm ơn quý khách và hẹn gặp lại!",
                 IsActive = true,
                 CreatedAt = DateTime.UtcNow
             };
+            db.Branches.Add(branchQ1);
+        }
 
+        var branchHN = await db.Branches.FirstOrDefaultAsync(b => b.Code == "CN02");
+        if (branchHN == null)
+        {
             branchHN = new Branch
             {
                 Id = Guid.NewGuid(),
                 Code = "CN02",
-                Name = "Chi nhánh 2 - Cầu Giấy (Hà Nội)",
-                Address = "Số 88 Cầu Giấy, Phường Quan Hoa, Quận Cầu Giấy, TP. Hà Nội",
-                Phone = "024 3766 5678",
-                OpenHours = "08:00 - 22:30",
-                TaxRatePercent = 8,
-                ServiceChargePercent = 5,
+                Name = "OrderPum - Hoàn Kiếm Hà Nội",
+                Address = "45 Phố Tràng Tiền, Quận Hoàn Kiếm, Hà Nội",
+                Phone = "0909888999",
+                OpenHours = "08:30 - 22:30",
+                ImageUrl = "https://images.unsplash.com/photo-1552566626-52f8b828add9?w=800&q=80",
+                TaxRatePercent = 8.00m,
+                ServiceChargePercent = 0.00m,
                 Currency = "VND",
-                IsTaxIncludedInPrice = false,
+                IsTaxIncludedInPrice = true,
                 IsServiceChargeIncluded = false,
-                ReceiptHeaderNote = "OrderPum Cầu Giấy - Hân hạnh phục vụ quý khách!",
-                ReceiptFooterNote = "Cảm ơn quý khách và hẹn gặp lại!",
+                ReceiptHeaderNote = "ORDERPUM HOÀN KIẾM HÂN HẠNH PHỤC VỤ",
+                ReceiptFooterNote = "Chúc quý khách ngon miệng!",
                 IsActive = true,
                 CreatedAt = DateTime.UtcNow
             };
-
-            db.Branches.AddRange(branchQ1, branchHN);
-            await db.SaveChangesAsync();
+            db.Branches.Add(branchHN);
         }
-        else
-        {
-            branchQ1 = existingBranches[0];
-            if (string.IsNullOrEmpty(branchQ1.Code))
-            {
-                branchQ1.Code = "CN01";
-            }
-            if (existingBranches.Count > 1)
-            {
-                branchHN = existingBranches[1];
-                if (string.IsNullOrEmpty(branchHN.Code))
-                {
-                    branchHN.Code = "CN02";
-                }
-            }
-            else
-            {
-                branchHN = new Branch
-                {
-                    Id = Guid.NewGuid(),
-                    Code = "CN02",
-                    Name = "Chi nhánh 2 - Cầu Giấy (Hà Nội)",
-                    Address = "Số 88 Cầu Giấy, Phường Quan Hoa, Quận Cầu Giấy, TP. Hà Nội",
-                    Phone = "024 3766 5678",
-                    OpenHours = "08:00 - 22:30",
-                    TaxRatePercent = 8,
-                    ServiceChargePercent = 5,
-                    Currency = "VND",
-                    IsActive = true,
-                    CreatedAt = DateTime.UtcNow
-                };
-                db.Branches.Add(branchHN);
-            }
-            await db.SaveChangesAsync();
-        }
+        await db.SaveChangesAsync();
 
-        // 3. Seed Tài khoản nhân viên mẫu liên kết bảng Roles
-        var defaultPasswordHash = PasswordHasher.Hash("Pass@123");
+        // 3. Seed Tài khoản mẫu
+        var roleChainDirector = await db.Roles.FirstAsync(r => r.Code == "ChainDirector");
+        var roleOwner = await db.Roles.FirstAsync(r => r.Code == "RestaurantOwner");
+        var roleManager = await db.Roles.FirstAsync(r => r.Code == "Manager");
+        var roleWaitStaff = await db.Roles.FirstAsync(r => r.Code == "WaitStaff");
 
         var sampleUsers = new List<UserAccount>
         {
             new()
             {
-                PhoneOrEmail = "director@orderpum.vn",
+                Id = Guid.NewGuid(),
+                PhoneOrEmail = "director@pum.vn",
                 DisplayName = "Nguyễn Văn Giám Đốc",
-                PasswordHash = defaultPasswordHash,
-                PinHash = PasswordHasher.Hash("1111"),
-                RoleId = roleMap.TryGetValue("ChainDirector", out var r1) ? r1.Id : null,
-                Role = StaffRole.ChainDirector,
+                PasswordHash = PasswordHasher.Hash("Director@123"),
+                PinHash = PasswordHasher.Hash("111111"),
+                RoleId = roleChainDirector.Id,
                 CustomRoleCode = "ChainDirector",
+                Role = StaffRole.ChainDirector,
                 BranchId = null,
                 IsLocked = false,
                 CreatedAt = DateTime.UtcNow
             },
             new()
             {
-                PhoneOrEmail = "owner@orderpum.vn",
+                Id = Guid.NewGuid(),
+                PhoneOrEmail = "owner@pum.vn",
                 DisplayName = "Trần Thị Chủ Quán",
-                PasswordHash = defaultPasswordHash,
-                PinHash = PasswordHasher.Hash("2222"),
-                RoleId = roleMap.TryGetValue("RestaurantOwner", out var r2) ? r2.Id : null,
-                Role = StaffRole.RestaurantOwner,
+                PasswordHash = PasswordHasher.Hash("Owner@123"),
+                PinHash = PasswordHasher.Hash("222222"),
+                RoleId = roleOwner.Id,
                 CustomRoleCode = "RestaurantOwner",
+                Role = StaffRole.RestaurantOwner,
                 BranchId = branchQ1.Id,
                 IsLocked = false,
                 CreatedAt = DateTime.UtcNow
             },
             new()
             {
-                PhoneOrEmail = "manager.q1@orderpum.vn",
-                DisplayName = "Lê Văn Quản Lý Q1",
-                PasswordHash = defaultPasswordHash,
-                PinHash = PasswordHasher.Hash("3333"),
-                RoleId = roleMap.TryGetValue("Manager", out var r3) ? r3.Id : null,
-                Role = StaffRole.Manager,
+                Id = Guid.NewGuid(),
+                PhoneOrEmail = "manager.q1@pum.vn",
+                DisplayName = "Lê Hoàng Quản Lý Q1",
+                PasswordHash = PasswordHasher.Hash("Manager@123"),
+                PinHash = PasswordHasher.Hash("333333"),
+                RoleId = roleManager.Id,
                 CustomRoleCode = "Manager",
-                BranchId = branchQ1.Id,
-                IsLocked = false,
-                CreatedAt = DateTime.UtcNow
-            },
-            new()
-            {
-                PhoneOrEmail = "manager.hn@orderpum.vn",
-                DisplayName = "Phạm Minh Quản Lý HN",
-                PasswordHash = defaultPasswordHash,
-                PinHash = PasswordHasher.Hash("3334"),
-                RoleId = roleMap.TryGetValue("Manager", out var r3b) ? r3b.Id : null,
                 Role = StaffRole.Manager,
-                CustomRoleCode = "Manager",
-                BranchId = branchHN.Id,
-                IsLocked = false,
-                CreatedAt = DateTime.UtcNow
-            },
-            new()
-            {
-                PhoneOrEmail = "lead.kitchen@orderpum.vn",
-                DisplayName = "Võ Quốc Bếp Trưởng",
-                PasswordHash = defaultPasswordHash,
-                PinHash = PasswordHasher.Hash("4444"),
-                RoleId = roleMap.TryGetValue("DepartmentLead", out var r4) ? r4.Id : null,
-                Role = StaffRole.DepartmentLead,
-                CustomRoleCode = "DepartmentLead",
                 BranchId = branchQ1.Id,
                 IsLocked = false,
                 CreatedAt = DateTime.UtcNow
             },
             new()
             {
-                PhoneOrEmail = "staff.service1@orderpum.vn",
-                DisplayName = "Đỗ Mai Phục Vụ",
-                PasswordHash = defaultPasswordHash,
-                PinHash = PasswordHasher.Hash("5555"),
-                RoleId = roleMap.TryGetValue("FullTimeStaff", out var r5) ? r5.Id : null,
+                Id = Guid.NewGuid(),
+                PhoneOrEmail = "staff.q1@pum.vn",
+                DisplayName = "Phạm Văn Phục Vụ",
+                PasswordHash = PasswordHasher.Hash("Staff@123"),
+                PinHash = PasswordHasher.Hash("1234"),
+                RoleId = roleWaitStaff.Id,
+                CustomRoleCode = "WaitStaff",
                 Role = StaffRole.FullTimeStaff,
-                CustomRoleCode = "FullTimeStaff",
-                BranchId = branchQ1.Id,
-                IsLocked = false,
-                CreatedAt = DateTime.UtcNow
-            },
-            new()
-            {
-                PhoneOrEmail = "staff.cashier@orderpum.vn",
-                DisplayName = "Hoàng Lan Thu Ngân",
-                PasswordHash = defaultPasswordHash,
-                PinHash = PasswordHasher.Hash("5556"),
-                RoleId = roleMap.TryGetValue("FullTimeStaff", out var r5b) ? r5b.Id : null,
-                Role = StaffRole.FullTimeStaff,
-                CustomRoleCode = "FullTimeStaff",
-                BranchId = branchQ1.Id,
-                IsLocked = false,
-                CreatedAt = DateTime.UtcNow
-            },
-            new()
-            {
-                PhoneOrEmail = "probation.waiter@orderpum.vn",
-                DisplayName = "Ngô Tuấn Thử Việc",
-                PasswordHash = defaultPasswordHash,
-                PinHash = PasswordHasher.Hash("6666"),
-                RoleId = roleMap.TryGetValue("ProbationStaff", out var r6) ? r6.Id : null,
-                Role = StaffRole.ProbationStaff,
-                CustomRoleCode = "ProbationStaff",
                 BranchId = branchQ1.Id,
                 IsLocked = false,
                 CreatedAt = DateTime.UtcNow
@@ -398,7 +354,6 @@ public static class DependencyInjection
                 }
             }
         }
-
         await db.SaveChangesAsync();
 
         // 4. Seed Khu vực (Areas) & Bàn ăn (DiningTables) cho Chi nhánh mẫu
@@ -416,22 +371,18 @@ public static class DependencyInjection
             // Seed Bàn ăn cho từng khu vực
             var tablesQ1 = new List<DiningTable>
             {
-                // Tầng 1
                 new() { Id = Guid.NewGuid(), BranchId = branchQ1.Id, AreaId = area1.Id, Code = "B01", Name = "Bàn 01", Capacity = 4, QrToken = Guid.NewGuid().ToString("N"), Status = "Available", PosX = 10, PosY = 10, IsActive = true, CreatedAt = DateTime.UtcNow },
                 new() { Id = Guid.NewGuid(), BranchId = branchQ1.Id, AreaId = area1.Id, Code = "B02", Name = "Bàn 02", Capacity = 4, QrToken = Guid.NewGuid().ToString("N"), Status = "Occupied", PosX = 30, PosY = 10, IsActive = true, CreatedAt = DateTime.UtcNow },
                 new() { Id = Guid.NewGuid(), BranchId = branchQ1.Id, AreaId = area1.Id, Code = "B03", Name = "Bàn 03", Capacity = 6, QrToken = Guid.NewGuid().ToString("N"), Status = "Available", PosX = 50, PosY = 10, IsActive = true, CreatedAt = DateTime.UtcNow },
                 new() { Id = Guid.NewGuid(), BranchId = branchQ1.Id, AreaId = area1.Id, Code = "B04", Name = "Bàn 04", Capacity = 2, QrToken = Guid.NewGuid().ToString("N"), Status = "NeedsCleaning", PosX = 70, PosY = 10, IsActive = true, CreatedAt = DateTime.UtcNow },
                 
-                // Tầng 2
                 new() { Id = Guid.NewGuid(), BranchId = branchQ1.Id, AreaId = area2.Id, Code = "B05", Name = "Bàn 05", Capacity = 4, QrToken = Guid.NewGuid().ToString("N"), Status = "Available", PosX = 10, PosY = 10, IsActive = true, CreatedAt = DateTime.UtcNow },
                 new() { Id = Guid.NewGuid(), BranchId = branchQ1.Id, AreaId = area2.Id, Code = "B06", Name = "Bàn 06", Capacity = 8, QrToken = Guid.NewGuid().ToString("N"), Status = "Reserved", PosX = 40, PosY = 10, IsActive = true, CreatedAt = DateTime.UtcNow },
                 new() { Id = Guid.NewGuid(), BranchId = branchQ1.Id, AreaId = area2.Id, Code = "B07", Name = "Bàn 07", Capacity = 4, QrToken = Guid.NewGuid().ToString("N"), Status = "Available", PosX = 70, PosY = 10, IsActive = true, CreatedAt = DateTime.UtcNow },
 
-                // Sân vườn
                 new() { Id = Guid.NewGuid(), BranchId = branchQ1.Id, AreaId = area3.Id, Code = "SV01", Name = "Bàn Sân Vườn 01", Capacity = 4, QrToken = Guid.NewGuid().ToString("N"), Status = "Available", PosX = 20, PosY = 20, IsActive = true, CreatedAt = DateTime.UtcNow },
                 new() { Id = Guid.NewGuid(), BranchId = branchQ1.Id, AreaId = area3.Id, Code = "SV02", Name = "Bàn Sân Vườn 02", Capacity = 6, QrToken = Guid.NewGuid().ToString("N"), Status = "Available", PosX = 60, PosY = 20, IsActive = true, CreatedAt = DateTime.UtcNow },
 
-                // VIP
                 new() { Id = Guid.NewGuid(), BranchId = branchQ1.Id, AreaId = area4.Id, Code = "VIP01", Name = "Phòng VIP Hoàng Gia", Capacity = 12, QrToken = Guid.NewGuid().ToString("N"), Status = "Available", PosX = 50, PosY = 50, IsActive = true, CreatedAt = DateTime.UtcNow }
             };
 
@@ -456,6 +407,358 @@ public static class DependencyInjection
             };
 
             db.Tables.AddRange(tablesHN);
+            await db.SaveChangesAsync();
+        }
+
+        // 5. Seed Thực đơn mẫu (Menu Categories, Items & Options - STT 34, 35, 36)
+        var existingCategoriesQ1 = await db.MenuCategories.Where(c => c.BranchId == branchQ1.Id && !c.IsDeleted).ToListAsync();
+        if (existingCategoriesQ1.Count == 0)
+        {
+            var catKhaiVi = new MenuCategory
+            {
+                Id = Guid.NewGuid(),
+                BranchId = branchQ1.Id,
+                Code = "KHAI_VI",
+                Name = "Món Khai Vị & Salad",
+                ImageUrl = "https://images.unsplash.com/photo-1540420773420-3366772f4999?w=600&q=80",
+                SortOrder = 1,
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow
+            };
+
+            var catNuong = new MenuCategory
+            {
+                Id = Guid.NewGuid(),
+                BranchId = branchQ1.Id,
+                Code = "MON_NUONG",
+                Name = "Món Nướng BBQ Đặc Biệt",
+                ImageUrl = "https://images.unsplash.com/photo-1544025162-d76694265947?w=600&q=80",
+                SortOrder = 2,
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow
+            };
+
+            var catLau = new MenuCategory
+            {
+                Id = Guid.NewGuid(),
+                BranchId = branchQ1.Id,
+                Code = "LAU_HAI_SAN",
+                Name = "Lẩu & Món Chính Thượng Hạng",
+                ImageUrl = "https://images.unsplash.com/photo-1547928576-a4a33237cbc3?w=600&q=80",
+                SortOrder = 3,
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow
+            };
+
+            var catDoUong = new MenuCategory
+            {
+                Id = Guid.NewGuid(),
+                BranchId = branchQ1.Id,
+                Code = "DO_UONG",
+                Name = "Đồ Uống & Trà Hoa Quả",
+                ImageUrl = "https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=600&q=80",
+                SortOrder = 4,
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow
+            };
+
+            var catTrangMieng = new MenuCategory
+            {
+                Id = Guid.NewGuid(),
+                BranchId = branchQ1.Id,
+                Code = "TRANG_MIENG",
+                Name = "Tráng Miệng & Chè Cung Đình",
+                ImageUrl = "https://images.unsplash.com/photo-1551024709-8f23befc6f87?w=600&q=80",
+                SortOrder = 5,
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow
+            };
+
+            db.MenuCategories.AddRange(catKhaiVi, catNuong, catLau, catDoUong, catTrangMieng);
+            await db.SaveChangesAsync();
+
+            // Seed Món ăn kèm Options
+            // Món 1: Bò Fuji Nướng
+            var itemBoFuji = new MenuItem
+            {
+                Id = Guid.NewGuid(),
+                BranchId = branchQ1.Id,
+                CategoryId = catNuong.Id,
+                Code = "BBQ01",
+                Name = "Bò Fuji Nướng Đá Sốt Tiêu Đen",
+                Description = "Thịt bò Fuji Nhật Bản vân mỡ mềm mọng, nướng đá nham thạch giữ trọn vị ngọt tự nhiên kết hợp sốt tiêu đen đậm đà.",
+                ImageUrl = "https://images.unsplash.com/photo-1544025162-d76694265947?w=800&q=80",
+                Price = 189000,
+                Unit = "Phần",
+                KitchenStation = "Kitchen",
+                PreparationMinutes = 15,
+                IsAvailable = true,
+                Is86ed = false,
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow
+            };
+
+            var optDoChin = new MenuItemOption
+            {
+                Id = Guid.NewGuid(),
+                MenuItemId = itemBoFuji.Id,
+                Name = "Độ chín thịt",
+                OptionType = "Single",
+                IsRequired = true,
+                SortOrder = 1,
+                CreatedAt = DateTime.UtcNow,
+                Values = new List<MenuItemOptionValue>
+                {
+                    new() { Id = Guid.NewGuid(), Name = "Tái vừa (Medium Rare)", ExtraPrice = 0, IsDefault = true, IsAvailable = true, SortOrder = 1, CreatedAt = DateTime.UtcNow },
+                    new() { Id = Guid.NewGuid(), Name = "Chín vừa (Medium)", ExtraPrice = 0, IsDefault = false, IsAvailable = true, SortOrder = 2, CreatedAt = DateTime.UtcNow },
+                    new() { Id = Guid.NewGuid(), Name = "Chín kỹ (Well Done)", ExtraPrice = 0, IsDefault = false, IsAvailable = true, SortOrder = 3, CreatedAt = DateTime.UtcNow }
+                }
+            };
+
+            var optToppingBo = new MenuItemOption
+            {
+                Id = Guid.NewGuid(),
+                MenuItemId = itemBoFuji.Id,
+                Name = "Topping gọi thêm",
+                OptionType = "Multiple",
+                IsRequired = false,
+                SortOrder = 2,
+                CreatedAt = DateTime.UtcNow,
+                Values = new List<MenuItemOptionValue>
+                {
+                    new() { Id = Guid.NewGuid(), Name = "Phô mai Mozzarella nướng kéo sợi", ExtraPrice = 25000, IsDefault = false, IsAvailable = true, SortOrder = 1, CreatedAt = DateTime.UtcNow },
+                    new() { Id = Guid.NewGuid(), Name = "Trứng gà non lòng đào", ExtraPrice = 20000, IsDefault = false, IsAvailable = true, SortOrder = 2, CreatedAt = DateTime.UtcNow }
+                }
+            };
+            itemBoFuji.Options.Add(optDoChin);
+            itemBoFuji.Options.Add(optToppingBo);
+
+            // Món 2: Lẩu Thái Tomyum
+            var itemLauThai = new MenuItem
+            {
+                Id = Guid.NewGuid(),
+                BranchId = branchQ1.Id,
+                CategoryId = catLau.Id,
+                Code = "LAU01",
+                Name = "Lẩu Thái Hải Sản Tomyum Thượng Hạng",
+                Description = "Nước dùng Tomyum chua cay chuẩn vị Thái, kèm đĩa tôm sú, mực nháy, nghêu trắng, ba chỉ bò Mỹ và đĩa rau nấm tươi xanh.",
+                ImageUrl = "https://images.unsplash.com/photo-1547928576-a4a33237cbc3?w=800&q=80",
+                Price = 299000,
+                Unit = "Nồi",
+                KitchenStation = "Kitchen",
+                PreparationMinutes = 20,
+                IsAvailable = true,
+                Is86ed = false,
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow
+            };
+
+            var optCay = new MenuItemOption
+            {
+                Id = Guid.NewGuid(),
+                MenuItemId = itemLauThai.Id,
+                Name = "Mức độ cay",
+                OptionType = "Single",
+                IsRequired = true,
+                SortOrder = 1,
+                CreatedAt = DateTime.UtcNow,
+                Values = new List<MenuItemOptionValue>
+                {
+                    new() { Id = Guid.NewGuid(), Name = "Cay vừa phải (Ít cay)", ExtraPrice = 0, IsDefault = true, IsAvailable = true, SortOrder = 1, CreatedAt = DateTime.UtcNow },
+                    new() { Id = Guid.NewGuid(), Name = "Cay nồng chuẩn vị Thái", ExtraPrice = 0, IsDefault = false, IsAvailable = true, SortOrder = 2, CreatedAt = DateTime.UtcNow }
+                }
+            };
+
+            var optToppingLau = new MenuItemOption
+            {
+                Id = Guid.NewGuid(),
+                MenuItemId = itemLauThai.Id,
+                Name = "Đồ nhúng thêm",
+                OptionType = "Multiple",
+                IsRequired = false,
+                SortOrder = 2,
+                CreatedAt = DateTime.UtcNow,
+                Values = new List<MenuItemOptionValue>
+                {
+                    new() { Id = Guid.NewGuid(), Name = "Thêm đĩa Ba chỉ bò Mỹ (150g)", ExtraPrice = 59000, IsDefault = false, IsAvailable = true, SortOrder = 1, CreatedAt = DateTime.UtcNow },
+                    new() { Id = Guid.NewGuid(), Name = "Thêm đĩa Tôm sú tươi (4 con)", ExtraPrice = 69000, IsDefault = false, IsAvailable = true, SortOrder = 2, CreatedAt = DateTime.UtcNow },
+                    new() { Id = Guid.NewGuid(), Name = "Mì tôm / Mì Ramen", ExtraPrice = 15000, IsDefault = false, IsAvailable = true, SortOrder = 3, CreatedAt = DateTime.UtcNow }
+                }
+            };
+            itemLauThai.Options.Add(optCay);
+            itemLauThai.Options.Add(optToppingLau);
+
+            // Món 3: Salad Cá Hồi
+            var itemSalad = new MenuItem
+            {
+                Id = Guid.NewGuid(),
+                BranchId = branchQ1.Id,
+                CategoryId = catKhaiVi.Id,
+                Code = "KV01",
+                Name = "Salad Cá Hồi Sốt Chanh Dây",
+                Description = "Cá hồi Na Uy tươi béo ngậy thái hạt lựu, rau xà lách thủy canh giòn ngọt kết hợp sốt chanh dây thơm thanh.",
+                ImageUrl = "https://images.unsplash.com/photo-1540420773420-3366772f4999?w=800&q=80",
+                Price = 125000,
+                Unit = "Đĩa",
+                KitchenStation = "Kitchen",
+                PreparationMinutes = 10,
+                IsAvailable = true,
+                Is86ed = false,
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow
+            };
+
+            // Món 4: Gà nướng mật ong
+            var itemGaNuong = new MenuItem
+            {
+                Id = Guid.NewGuid(),
+                BranchId = branchQ1.Id,
+                CategoryId = catNuong.Id,
+                Code = "BBQ02",
+                Name = "Gà Nướng Mật Ong Rừng Tây Bắc",
+                Description = "Đùi gà ướp sốt mắc khén và mật ong rừng nướng than hoa vàng giòn da, thịt mềm ngọt đậm vị.",
+                ImageUrl = "https://images.unsplash.com/photo-1598103442097-8b74394b95c6?w=800&q=80",
+                Price = 165000,
+                Unit = "Đĩa",
+                KitchenStation = "Kitchen",
+                PreparationMinutes = 20,
+                IsAvailable = true,
+                Is86ed = false,
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow
+            };
+
+            // Món 5: Trà Đào Cam Sả
+            var itemTraDao = new MenuItem
+            {
+                Id = Guid.NewGuid(),
+                BranchId = branchQ1.Id,
+                CategoryId = catDoUong.Id,
+                Code = "DU01",
+                Name = "Trà Đào Cam Sả Tươi Mát",
+                Description = "Trà đen ủ lạnh kết hợp nước cam vắt nguyên chất, sả thơm thanh mát và những lát đào giòn ngọt sảng khoái.",
+                ImageUrl = "https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=800&q=80",
+                Price = 45000,
+                Unit = "Ly",
+                KitchenStation = "Bar",
+                PreparationMinutes = 5,
+                IsAvailable = true,
+                Is86ed = false,
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow
+            };
+
+            var optSizeTra = new MenuItemOption
+            {
+                Id = Guid.NewGuid(),
+                MenuItemId = itemTraDao.Id,
+                Name = "Kích cỡ Size",
+                OptionType = "Single",
+                IsRequired = true,
+                SortOrder = 1,
+                CreatedAt = DateTime.UtcNow,
+                Values = new List<MenuItemOptionValue>
+                {
+                    new() { Id = Guid.NewGuid(), Name = "Size M (Vừa)", ExtraPrice = 0, IsDefault = true, IsAvailable = true, SortOrder = 1, CreatedAt = DateTime.UtcNow },
+                    new() { Id = Guid.NewGuid(), Name = "Size L (Lớn +500ml)", ExtraPrice = 10000, IsDefault = false, IsAvailable = true, SortOrder = 2, CreatedAt = DateTime.UtcNow }
+                }
+            };
+
+            var optDuong = new MenuItemOption
+            {
+                Id = Guid.NewGuid(),
+                MenuItemId = itemTraDao.Id,
+                Name = "Lượng đường",
+                OptionType = "Single",
+                IsRequired = true,
+                SortOrder = 2,
+                CreatedAt = DateTime.UtcNow,
+                Values = new List<MenuItemOptionValue>
+                {
+                    new() { Id = Guid.NewGuid(), Name = "100% Đường (Chuẩn vị)", ExtraPrice = 0, IsDefault = true, IsAvailable = true, SortOrder = 1, CreatedAt = DateTime.UtcNow },
+                    new() { Id = Guid.NewGuid(), Name = "70% Đường (Ít ngọt)", ExtraPrice = 0, IsDefault = false, IsAvailable = true, SortOrder = 2, CreatedAt = DateTime.UtcNow },
+                    new() { Id = Guid.NewGuid(), Name = "50% Đường (Ngọt nhẹ)", ExtraPrice = 0, IsDefault = false, IsAvailable = true, SortOrder = 3, CreatedAt = DateTime.UtcNow },
+                    new() { Id = Guid.NewGuid(), Name = "Không đường", ExtraPrice = 0, IsDefault = false, IsAvailable = true, SortOrder = 4, CreatedAt = DateTime.UtcNow }
+                }
+            };
+
+            var optToppingTra = new MenuItemOption
+            {
+                Id = Guid.NewGuid(),
+                MenuItemId = itemTraDao.Id,
+                Name = "Topping thêm",
+                OptionType = "Multiple",
+                IsRequired = false,
+                SortOrder = 3,
+                CreatedAt = DateTime.UtcNow,
+                Values = new List<MenuItemOptionValue>
+                {
+                    new() { Id = Guid.NewGuid(), Name = "Thêm 2 miếng đào giòn", ExtraPrice = 10000, IsDefault = false, IsAvailable = true, SortOrder = 1, CreatedAt = DateTime.UtcNow },
+                    new() { Id = Guid.NewGuid(), Name = "Trân châu trắng 3Q", ExtraPrice = 8000, IsDefault = false, IsAvailable = true, SortOrder = 2, CreatedAt = DateTime.UtcNow }
+                }
+            };
+            itemTraDao.Options.Add(optSizeTra);
+            itemTraDao.Options.Add(optDuong);
+            itemTraDao.Options.Add(optToppingTra);
+
+            // Món 6: Trà Sữa Oolong Nướng
+            var itemTraSua = new MenuItem
+            {
+                Id = Guid.NewGuid(),
+                BranchId = branchQ1.Id,
+                CategoryId = catDoUong.Id,
+                Code = "DU02",
+                Name = "Trà Sữa Oolong Nướng Trân Châu Hoàng Kim",
+                Description = "Hương trà Oolong nướng đậm đà, sữa béo ngậy kết hợp trân châu hoàng kim nấu đường nâu dẻo dai hấp dẫn.",
+                ImageUrl = "https://images.unsplash.com/photo-1558857563-b371033873b8?w=800&q=80",
+                Price = 49000,
+                Unit = "Ly",
+                KitchenStation = "Bar",
+                PreparationMinutes = 5,
+                IsAvailable = true,
+                Is86ed = false,
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow
+            };
+
+            var optToppingTraSua = new MenuItemOption
+            {
+                Id = Guid.NewGuid(),
+                MenuItemId = itemTraSua.Id,
+                Name = "Topping Trà Sữa",
+                OptionType = "Multiple",
+                IsRequired = false,
+                SortOrder = 1,
+                CreatedAt = DateTime.UtcNow,
+                Values = new List<MenuItemOptionValue>
+                {
+                    new() { Id = Guid.NewGuid(), Name = "Kem Cheese phô mai mặn béo ngậy", ExtraPrice = 15000, IsDefault = false, IsAvailable = true, SortOrder = 1, CreatedAt = DateTime.UtcNow },
+                    new() { Id = Guid.NewGuid(), Name = "Pudding trứng sữa mềm mịn", ExtraPrice = 12000, IsDefault = false, IsAvailable = true, SortOrder = 2, CreatedAt = DateTime.UtcNow }
+                }
+            };
+            itemTraSua.Options.Add(optToppingTraSua);
+
+            // Món 7: Panna Cotta
+            var itemPannaCotta = new MenuItem
+            {
+                Id = Guid.NewGuid(),
+                BranchId = branchQ1.Id,
+                CategoryId = catTrangMieng.Id,
+                Code = "TM01",
+                Name = "Panna Cotta Sốt Dâu Tây Tươi",
+                Description = "Bánh kem sữa Ý mềm mịn tan ngay đầu lưỡi, phủ sốt dâu tây tươi chua ngọt hài hòa.",
+                ImageUrl = "https://images.unsplash.com/photo-1551024709-8f23befc6f87?w=800&q=80",
+                Price = 39000,
+                Unit = "Hũ",
+                KitchenStation = "Pastry",
+                PreparationMinutes = 3,
+                IsAvailable = true,
+                Is86ed = false,
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow
+            };
+
+            db.MenuItems.AddRange(itemBoFuji, itemLauThai, itemSalad, itemGaNuong, itemTraDao, itemTraSua, itemPannaCotta);
             await db.SaveChangesAsync();
         }
     }

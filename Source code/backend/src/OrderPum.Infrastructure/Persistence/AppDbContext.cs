@@ -16,6 +16,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<DiningTable> Tables => Set<DiningTable>();
     public DbSet<MenuCategory> MenuCategories => Set<MenuCategory>();
     public DbSet<MenuItem> MenuItems => Set<MenuItem>();
+    public DbSet<MenuItemOption> MenuItemOptions => Set<MenuItemOption>();
+    public DbSet<MenuItemOptionValue> MenuItemOptionValues => Set<MenuItemOptionValue>();
     public DbSet<TableSession> TableSessions => Set<TableSession>();
     public DbSet<OrderTicket> OrderTickets => Set<OrderTicket>();
     public DbSet<OrderLine> OrderLines => Set<OrderLine>();
@@ -41,6 +43,36 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             .WithOne(t => t.Area)
             .HasForeignKey(t => t.AreaId)
             .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<MenuCategory>()
+            .HasMany(c => c.Items)
+            .WithOne(i => i.Category)
+            .HasForeignKey(i => i.CategoryId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<MenuItem>()
+            .Property(i => i.Price)
+            .HasPrecision(18, 2);
+
+        modelBuilder.Entity<MenuItem>()
+            .HasMany(i => i.Options)
+            .WithOne(o => o.MenuItem)
+            .HasForeignKey(o => o.MenuItemId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<MenuItemOption>()
+            .HasMany(o => o.Values)
+            .WithOne(v => v.Option)
+            .HasForeignKey(v => v.OptionId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<MenuItemOptionValue>()
+            .Property(v => v.ExtraPrice)
+            .HasPrecision(18, 2);
+
+        modelBuilder.Entity<OrderLine>()
+            .Property(l => l.UnitPrice)
+            .HasPrecision(18, 2);
 
         base.OnModelCreating(modelBuilder);
     }
