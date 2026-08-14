@@ -12,6 +12,7 @@ import {
   CreateTableRequest,
   UpdateTableRequest,
 } from "@/shared/api/client";
+import Link from "next/link";
 import {
   QrCode,
   Plus,
@@ -35,6 +36,7 @@ import {
   Move,
   Save,
   Grid,
+  ShoppingCart,
 } from "lucide-react";
 
 export default function TablesManagementPage() {
@@ -1188,6 +1190,16 @@ export default function TablesManagementPage() {
 
                               {/* Quick Action Buttons */}
                               <div className="mt-3 flex items-center justify-between gap-1 pt-2 border-t border-stone-800/80">
+                                <Link
+                                  href={`/admin/pos?tableId=${table.id}`}
+                                  onClick={(e) => e.stopPropagation()}
+                                  title="Order hộ tại bàn này (STT 21)"
+                                  className="flex-1 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500 text-amber-300 hover:text-stone-950 text-[10px] font-bold flex items-center justify-center gap-1 transition"
+                                >
+                                  <ShoppingCart className="w-3 h-3" />
+                                  <span>Order</span>
+                                </Link>
+
                                 {table.status === "Occupied" ? (
                                   <button
                                     onClick={(e) => {
@@ -1195,7 +1207,7 @@ export default function TablesManagementPage() {
                                       handleOpenTransferModal(table);
                                     }}
                                     title="Chuyển bàn này (STT 17)"
-                                    className="flex-1 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-stone-950 text-[10px] font-black flex items-center justify-center gap-1 shadow-sm transition"
+                                    className="py-1 px-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-stone-950 text-[10px] font-black flex items-center justify-center gap-1 shadow-sm transition"
                                   >
                                     <ArrowRightLeft className="w-3 h-3" />
                                     <span>Chuyển</span>
@@ -1208,7 +1220,7 @@ export default function TablesManagementPage() {
                                       setIsQrModalOpen(true);
                                     }}
                                     title="Xem mã QR gọi món"
-                                    className="flex-1 py-1 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-300 hover:text-amber-400 text-[10px] font-semibold flex items-center justify-center gap-1 transition"
+                                    className="py-1 px-1.5 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-300 hover:text-amber-400 text-[10px] font-semibold flex items-center justify-center gap-1 transition"
                                   >
                                     <QrCode className="w-3 h-3" />
                                     <span>QR</span>
@@ -1221,7 +1233,7 @@ export default function TablesManagementPage() {
                                     e.stopPropagation();
                                     handleQuickStatusChange(table.id, e.target.value);
                                   }}
-                                  className="bg-stone-950 text-[10px] border border-stone-800 rounded-lg px-1.5 py-1 text-stone-300 focus:outline-none cursor-pointer"
+                                  className="bg-stone-950 text-[10px] border border-stone-800 rounded-lg px-1 py-1 text-stone-300 focus:outline-none cursor-pointer"
                                 >
                                   <option value="Available">Trống</option>
                                   <option value="Occupied">Khách</option>
@@ -1320,14 +1332,25 @@ export default function TablesManagementPage() {
 
                 {/* Bottom Actions */}
                 <div className="mt-4 pt-2 flex items-center justify-between gap-1 text-xs">
+                  {/* Order Button (STT 21) */}
+                  <Link
+                    href={`/admin/pos?tableId=${table.id}`}
+                    title="Order hộ tại bàn này (STT 21)"
+                    className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500 text-amber-300 hover:text-stone-950 font-bold transition-colors shadow-sm"
+                  >
+                    <ShoppingCart className="w-3.5 h-3.5" />
+                    <span>Order</span>
+                  </Link>
+
                   {/* Transfer Button (STT 17) */}
                   {table.status === "Occupied" ? (
                     <button
                       onClick={() => handleOpenTransferModal(table)}
-                      className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-stone-950 font-bold transition-colors shadow-sm"
+                      className="px-2 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-stone-950 font-bold transition-colors shadow-sm flex items-center gap-1"
+                      title="Chuyển bàn này (STT 17)"
                     >
                       <ArrowRightLeft className="w-3.5 h-3.5" />
-                      <span>Chuyển bàn</span>
+                      <span>Chuyển</span>
                     </button>
                   ) : (
                     <button
@@ -1335,10 +1358,11 @@ export default function TablesManagementPage() {
                         setActiveQrTable(table);
                         setIsQrModalOpen(true);
                       }}
-                      className="flex-1 flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/20 font-medium transition-colors"
+                      className="px-2.5 py-1.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-300 hover:text-amber-400 font-medium transition-colors flex items-center gap-1"
+                      title="Xem mã QR gọi món"
                     >
                       <QrCode className="w-3.5 h-3.5" />
-                      <span>Xem QR</span>
+                      <span>QR</span>
                     </button>
                   )}
 

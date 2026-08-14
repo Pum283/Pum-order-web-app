@@ -129,6 +129,40 @@ public static class DependencyInjection
                 IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('MenuItems') AND name = 'IsActive')
                     ALTER TABLE [MenuItems] ADD [IsActive] BIT NOT NULL DEFAULT 1;
             END
+
+            IF EXISTS (SELECT * FROM sys.tables WHERE name = 'TableSessions')
+            BEGIN
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('TableSessions') AND name = 'SessionCode')
+                    ALTER TABLE [TableSessions] ADD [SessionCode] NVARCHAR(50) NOT NULL DEFAULT '';
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('TableSessions') AND name = 'GuestCount')
+                    ALTER TABLE [TableSessions] ADD [GuestCount] INT NOT NULL DEFAULT 1;
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('TableSessions') AND name = 'OpenedByUserId')
+                    ALTER TABLE [TableSessions] ADD [OpenedByUserId] UNIQUEIDENTIFIER NULL;
+            END
+
+            IF EXISTS (SELECT * FROM sys.tables WHERE name = 'OrderTickets')
+            BEGIN
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('OrderTickets') AND name = 'TicketNumber')
+                    ALTER TABLE [OrderTickets] ADD [TicketNumber] INT NOT NULL DEFAULT 1;
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('OrderTickets') AND name = 'Note')
+                    ALTER TABLE [OrderTickets] ADD [Note] NVARCHAR(500) NULL;
+            END
+
+            IF EXISTS (SELECT * FROM sys.tables WHERE name = 'OrderLines')
+            BEGIN
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('OrderLines') AND name = 'SessionId')
+                    ALTER TABLE [OrderLines] ADD [SessionId] UNIQUEIDENTIFIER NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000';
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('OrderLines') AND name = 'ItemCodeSnapshot')
+                    ALTER TABLE [OrderLines] ADD [ItemCodeSnapshot] NVARCHAR(50) NOT NULL DEFAULT '';
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('OrderLines') AND name = 'SelectedOptionsText')
+                    ALTER TABLE [OrderLines] ADD [SelectedOptionsText] NVARCHAR(MAX) NULL;
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('OrderLines') AND name = 'KitchenStation')
+                    ALTER TABLE [OrderLines] ADD [KitchenStation] NVARCHAR(50) NOT NULL DEFAULT 'Kitchen';
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('OrderLines') AND name = 'ReadyAt')
+                    ALTER TABLE [OrderLines] ADD [ReadyAt] DATETIME2 NULL;
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('OrderLines') AND name = 'ServedAt')
+                    ALTER TABLE [OrderLines] ADD [ServedAt] DATETIME2 NULL;
+            END
         ");
 
         // 1. Seed Bảng Roles (Bảng Vai trò động trong CSDL)

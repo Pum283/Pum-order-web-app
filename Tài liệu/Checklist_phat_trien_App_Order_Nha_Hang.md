@@ -70,7 +70,7 @@ _Menu bán được trên App NV, QR và POS._
 
 _Luồng phục vụ truyền thống: NV đến bàn, ghi món theo ý khách (không cần khách tự quét QR). Nên làm trước hoặc song song Order QR. Chi tiết: STT 21._
 
-- [ ] (21) Nhân viên order hộ khách tại bàn — chọn bàn, nhập món, gửi thẳng KDS; gọi thêm trong phiên; song song với QR trên cùng bàn
+- [x] (21) Nhân viên order hộ khách tại bàn — chọn bàn, nhập món, gửi thẳng KDS; gọi thêm trong phiên; song song với QR trên cùng bàn
 
 ### Bước 1.7 — Order QR: xem menu & đặt món
 

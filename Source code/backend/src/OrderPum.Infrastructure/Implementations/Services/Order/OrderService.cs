@@ -9,119 +9,275 @@ namespace OrderPum.Infrastructure.Implementations.Services.Order;
 
 public class OrderService(AppDbContext db) : IOrderService
 {
-    public async Task<SessionDto> OpenSessionAsync(OpenSessionRequest request, Guid? staffUserId, CancellationToken ct = default)
+    public async Task<TableSessionDetailDto> OpenSessionAsync(OpenSessionRequest request, Guid? staffUserId, CancellationToken ct = default)
     {
         var table = await db.Tables.FirstOrDefaultAsync(x => x.Id == request.TableId && !x.IsDeleted, ct)
-            ?? throw new InvalidOperationException("Không tìm thấy bàn.");
+            ?? throw new InvalidOperationException("Không tìm thấy bàn ăn.");
 
         var existing = await db.TableSessions
             .FirstOrDefaultAsync(x => x.TableId == table.Id && x.Status == TableSessionStatus.Open && !x.IsDeleted, ct);
-        if (existing is not null)
-            return (await GetSessionAsync(existing.Id, ct))!;
 
+        if (existing is not null)
+        {
+            return (await GetSessionByIdAsync(existing.Id, ct))!;
+        }
+
+        var sessionCode = $"SES-{DateTime.UtcNow:yyMMdd}-{new Random().Next(100, 999)}";
         var session = new TableSession
         {
+            Id = Guid.NewGuid(),
             BranchId = table.BranchId,
             TableId = table.Id,
-            Status = TableSessionStatus.Open
+            SessionCode = sessionCode,
+            GuestCount = request.GuestCount > 0 ? request.GuestCount : table.Capacity,
+            OpenedByUserId = staffUserId,
+            Status = TableSessionStatus.Open,
+            OpenedAt = DateTime.UtcNow,
+            CreatedAt = DateTime.UtcNow
         };
+
+        table.Status = "Occupied";
+        table.UpdatedAt = DateTime.UtcNow;
+
         db.TableSessions.Add(session);
         await db.SaveChangesAsync(ct);
-        return (await GetSessionAsync(session.Id, ct))!;
+
+        return (await GetSessionByIdAsync(session.Id, ct))!;
+    }
+
+    public async Task<TableSessionDetailDto?> GetActiveSessionByTableAsync(Guid tableId, CancellationToken ct = default)
+    {
+        var session = await db.TableSessions
+            .FirstOrDefaultAsync(x => x.TableId == tableId && x.Status == TableSessionStatus.Open && !x.IsDeleted, ct);
+
+        if (session is null) return null;
+
+        return await GetSessionByIdAsync(session.Id, ct);
+    }
+
+    public async Task<TableSessionDetailDto?> GetSessionByIdAsync(Guid sessionId, CancellationToken ct = default)
+    {
+        var session = await db.TableSessions.FirstOrDefaultAsync(x => x.Id == sessionId && !x.IsDeleted, ct);
+        if (session is null) return null;
+
+        var table = await db.Tables.FirstOrDefaultAsync(t => t.Id == session.TableId, ct);
+        var area = table != null ? await db.Areas.FirstOrDefaultAsync(a => a.Id == table.AreaId, ct) : null;
+        var branch = await db.Branches.FirstOrDefaultAsync(b => b.Id == session.BranchId, ct);
+
+        var tickets = await db.OrderTickets
+            .Where(x => x.SessionId == sessionId && !x.IsDeleted)
+            .OrderBy(x => x.OrderedAt)
+            .ToListAsync(ct);
+
+        var ticketDtos = new List<OrderTicketDto>();
+        foreach (var t in tickets)
+        {
+            var lines = await db.OrderLines.Where(x => x.TicketId == t.Id && !x.IsDeleted).ToListAsync(ct);
+            string? staffName = null;
+            if (t.CreatedByUserId.HasValue)
+            {
+                staffName = await db.Users
+                    .Where(u => u.Id == t.CreatedByUserId.Value)
+                    .Select(u => u.DisplayName)
+                    .FirstOrDefaultAsync(ct);
+            }
+
+            ticketDtos.Add(new OrderTicketDto
+            {
+                Id = t.Id,
+                SessionId = t.SessionId,
+                TicketNumber = t.TicketNumber,
+                Source = t.Source.ToString(),
+                CreatedByUserName = staffName,
+                Note = t.Note,
+                OrderedAt = t.OrderedAt,
+                Lines = lines.Select(l => new OrderLineDto
+                {
+                    Id = l.Id,
+                    TicketId = l.TicketId,
+                    MenuItemId = l.MenuItemId,
+                    ItemCode = l.ItemCodeSnapshot,
+                    ItemName = l.ItemNameSnapshot,
+                    Quantity = l.Quantity,
+                    UnitPrice = l.UnitPrice,
+                    SelectedOptionsText = l.SelectedOptionsText,
+                    Note = l.Note,
+                    KitchenStation = l.KitchenStation,
+                    Status = l.Status.ToString()
+                }).ToList()
+            });
+        }
+
+        return new TableSessionDetailDto
+        {
+            Id = session.Id,
+            BranchId = session.BranchId,
+            BranchName = branch?.Name ?? string.Empty,
+            TableId = session.TableId,
+            TableCode = table?.Code ?? string.Empty,
+            TableName = table?.Name ?? table?.Code ?? string.Empty,
+            AreaName = area?.Name ?? string.Empty,
+            SessionCode = session.SessionCode,
+            GuestCount = session.GuestCount,
+            Status = session.Status.ToString(),
+            OpenedAt = session.OpenedAt,
+            ClosedAt = session.ClosedAt,
+            Tickets = ticketDtos
+        };
     }
 
     public async Task<OrderTicketDto> PlaceStaffOrderAsync(StaffPlaceOrderRequest request, Guid staffUserId, CancellationToken ct = default)
     {
-        var session = await RequireOpenSession(request.SessionId, ct);
-        var ticket = await CreateTicketAsync(session, OrderSource.StaffAssisted, staffUserId, request.Lines, sendStraightToKitchen: true, ct);
-        return await MapTicket(ticket.Id, ct);
+        var session = await db.TableSessions.FirstOrDefaultAsync(x => x.Id == request.SessionId && !x.IsDeleted, ct)
+            ?? throw new InvalidOperationException("Không tìm thấy phiên bàn.");
+
+        if (session.Status != TableSessionStatus.Open)
+            throw new InvalidOperationException("Phiên bàn đã kết thúc hoặc đang thanh toán.");
+
+        var ticket = await CreateTicketAsync(session, OrderSource.StaffAssisted, staffUserId, request.Note, request.Lines, sendStraightToKitchen: true, ct);
+
+        // Update table to Occupied
+        var table = await db.Tables.FirstOrDefaultAsync(t => t.Id == session.TableId, ct);
+        if (table != null && table.Status != "Occupied")
+        {
+            table.Status = "Occupied";
+            table.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+        }
+
+        return await MapTicketDtoAsync(ticket.Id, ct);
     }
 
     public async Task<OrderTicketDto> PlaceQrOrderAsync(QrPlaceOrderRequest request, CancellationToken ct = default)
     {
         var table = await db.Tables.FirstOrDefaultAsync(x => x.QrToken == request.TableQrToken && !x.IsDeleted, ct)
-            ?? throw new InvalidOperationException("QR bàn không hợp lệ.");
+            ?? throw new InvalidOperationException("Mã QR bàn không hợp lệ.");
 
         var session = await db.TableSessions
             .FirstOrDefaultAsync(x => x.TableId == table.Id && x.Status == TableSessionStatus.Open && !x.IsDeleted, ct);
+
         if (session is null)
         {
-            session = new TableSession { BranchId = table.BranchId, TableId = table.Id };
+            session = new TableSession
+            {
+                Id = Guid.NewGuid(),
+                BranchId = table.BranchId,
+                TableId = table.Id,
+                SessionCode = $"SES-{DateTime.UtcNow:yyMMdd}-{new Random().Next(100, 999)}",
+                GuestCount = table.Capacity,
+                Status = TableSessionStatus.Open,
+                OpenedAt = DateTime.UtcNow,
+                CreatedAt = DateTime.UtcNow
+            };
+            table.Status = "Occupied";
+            table.UpdatedAt = DateTime.UtcNow;
             db.TableSessions.Add(session);
             await db.SaveChangesAsync(ct);
         }
 
-        var ticket = await CreateTicketAsync(session, OrderSource.CustomerQr, null, request.Lines, sendStraightToKitchen: false, ct);
-        return await MapTicket(ticket.Id, ct);
+        var ticket = await CreateTicketAsync(session, OrderSource.CustomerQr, null, request.Note, request.Lines, sendStraightToKitchen: false, ct);
+        return await MapTicketDtoAsync(ticket.Id, ct);
     }
 
     public async Task ConfirmQrTicketAsync(Guid ticketId, Guid staffUserId, CancellationToken ct = default)
     {
-        var ticket = await db.OrderTickets.FirstOrDefaultAsync(x => x.Id == ticketId, ct)
-            ?? throw new InvalidOperationException("Không tìm thấy order.");
+        var ticket = await db.OrderTickets.FirstOrDefaultAsync(x => x.Id == ticketId && !x.IsDeleted, ct)
+            ?? throw new InvalidOperationException("Không tìm thấy đợt gọi món.");
+
         if (ticket.Source != OrderSource.CustomerQr)
             throw new InvalidOperationException("Chỉ xác nhận order từ khách QR.");
 
-        var lines = await db.OrderLines.Where(x => x.TicketId == ticketId).ToListAsync(ct);
+        var lines = await db.OrderLines.Where(x => x.TicketId == ticketId && !x.IsDeleted).ToListAsync(ct);
         foreach (var line in lines.Where(x => x.Status == OrderItemStatus.PendingConfirm))
+        {
             line.Status = OrderItemStatus.SentToKitchen;
+            line.UpdatedAt = DateTime.UtcNow;
+        }
 
         await db.SaveChangesAsync(ct);
     }
 
-    public async Task<SessionDto?> GetSessionAsync(Guid sessionId, CancellationToken ct = default)
+    public async Task<bool> CloseSessionAsync(Guid sessionId, Guid staffUserId, CancellationToken ct = default)
     {
         var session = await db.TableSessions.FirstOrDefaultAsync(x => x.Id == sessionId && !x.IsDeleted, ct);
-        if (session is null) return null;
+        if (session is null) return false;
 
-        var tickets = await db.OrderTickets.Where(x => x.SessionId == sessionId).OrderBy(x => x.OrderedAt).ToListAsync(ct);
-        var ticketDtos = new List<OrderTicketDto>();
-        foreach (var t in tickets)
-            ticketDtos.Add(await MapTicket(t.Id, ct));
+        session.Status = TableSessionStatus.Closed;
+        session.ClosedAt = DateTime.UtcNow;
+        session.UpdatedAt = DateTime.UtcNow;
 
-        return new SessionDto(session.Id, session.TableId, session.Status.ToString(), ticketDtos);
-    }
+        var table = await db.Tables.FirstOrDefaultAsync(t => t.Id == session.TableId, ct);
+        if (table != null)
+        {
+            table.Status = "NeedsCleaning";
+            table.UpdatedAt = DateTime.UtcNow;
+        }
 
-    private async Task<TableSession> RequireOpenSession(Guid sessionId, CancellationToken ct)
-    {
-        var session = await db.TableSessions.FirstOrDefaultAsync(x => x.Id == sessionId && !x.IsDeleted, ct)
-            ?? throw new InvalidOperationException("Không tìm thấy phiên bàn.");
-        if (session.Status != TableSessionStatus.Open)
-            throw new InvalidOperationException("Phiên bàn đã đóng.");
-        return session;
+        await db.SaveChangesAsync(ct);
+        return true;
     }
 
     private async Task<OrderTicket> CreateTicketAsync(
         TableSession session,
         OrderSource source,
         Guid? staffUserId,
+        string? ticketNote,
         IReadOnlyList<StaffOrderLineRequest> lines,
         bool sendStraightToKitchen,
         CancellationToken ct)
     {
-        if (lines.Count == 0) throw new InvalidOperationException("Order trống.");
+        if (lines.Count == 0) throw new InvalidOperationException("Đơn gọi món đang trống.");
 
+        var ticketCount = await db.OrderTickets.CountAsync(t => t.SessionId == session.Id, ct);
         var ticket = new OrderTicket
         {
+            Id = Guid.NewGuid(),
             SessionId = session.Id,
+            TicketNumber = ticketCount + 1,
             Source = source,
-            CreatedByUserId = staffUserId
+            CreatedByUserId = staffUserId,
+            Note = ticketNote?.Trim(),
+            OrderedAt = DateTime.UtcNow,
+            CreatedAt = DateTime.UtcNow
         };
         db.OrderTickets.Add(ticket);
 
         foreach (var line in lines)
         {
-            var item = await db.MenuItems.FirstOrDefaultAsync(x => x.Id == line.MenuItemId && x.IsAvailable && !x.IsDeleted, ct)
-                ?? throw new InvalidOperationException("Món không khả dụng.");
+            var item = await db.MenuItems.FirstOrDefaultAsync(x => x.Id == line.MenuItemId && x.IsAvailable && !x.Is86ed && !x.IsDeleted, ct)
+                ?? throw new InvalidOperationException($"Món ăn ID {line.MenuItemId} không khả dụng hoặc đã hết.");
+
+            decimal extraSum = 0;
+            var optionDescList = new List<string>();
+
+            if (line.SelectedOptions != null && line.SelectedOptions.Count > 0)
+            {
+                foreach (var opt in line.SelectedOptions)
+                {
+                    extraSum += opt.ExtraPrice;
+                    var extraText = opt.ExtraPrice > 0 ? $" (+{opt.ExtraPrice:N0}đ)" : "";
+                    optionDescList.Add($"{opt.OptionName}: {opt.ValueName}{extraText}");
+                }
+            }
+
+            var lineUnitPrice = item.Price + extraSum;
+            var optionsSnapshotText = optionDescList.Count > 0 ? string.Join(" • ", optionDescList) : null;
+
             db.OrderLines.Add(new OrderLine
             {
+                Id = Guid.NewGuid(),
                 TicketId = ticket.Id,
+                SessionId = session.Id,
                 MenuItemId = item.Id,
+                ItemCodeSnapshot = item.Code,
                 ItemNameSnapshot = item.Name,
-                UnitPrice = item.Price,
-                Quantity = line.Quantity,
-                Note = line.Note,
-                Status = sendStraightToKitchen ? OrderItemStatus.SentToKitchen : OrderItemStatus.PendingConfirm
+                UnitPrice = lineUnitPrice,
+                Quantity = line.Quantity > 0 ? line.Quantity : 1,
+                SelectedOptionsText = optionsSnapshotText,
+                Note = line.Note?.Trim(),
+                KitchenStation = item.KitchenStation,
+                Status = sendStraightToKitchen ? OrderItemStatus.SentToKitchen : OrderItemStatus.PendingConfirm,
+                CreatedAt = DateTime.UtcNow
             });
         }
 
@@ -129,14 +285,42 @@ public class OrderService(AppDbContext db) : IOrderService
         return ticket;
     }
 
-    private async Task<OrderTicketDto> MapTicket(Guid ticketId, CancellationToken ct)
+    private async Task<OrderTicketDto> MapTicketDtoAsync(Guid ticketId, CancellationToken ct)
     {
         var ticket = await db.OrderTickets.FirstAsync(x => x.Id == ticketId, ct);
-        var lines = await db.OrderLines.Where(x => x.TicketId == ticketId).ToListAsync(ct);
-        return new OrderTicketDto(
-            ticket.Id,
-            ticket.Source.ToString(),
-            ticket.OrderedAt,
-            lines.Select(l => new OrderLineDto(l.Id, l.ItemNameSnapshot, l.Quantity, l.UnitPrice, l.Note, l.Status.ToString())).ToList());
+        var lines = await db.OrderLines.Where(x => x.TicketId == ticketId && !x.IsDeleted).ToListAsync(ct);
+        string? staffName = null;
+        if (ticket.CreatedByUserId.HasValue)
+        {
+            staffName = await db.Users
+                .Where(u => u.Id == ticket.CreatedByUserId.Value)
+                .Select(u => u.DisplayName)
+                .FirstOrDefaultAsync(ct);
+        }
+
+        return new OrderTicketDto
+        {
+            Id = ticket.Id,
+            SessionId = ticket.SessionId,
+            TicketNumber = ticket.TicketNumber,
+            Source = ticket.Source.ToString(),
+            CreatedByUserName = staffName,
+            Note = ticket.Note,
+            OrderedAt = ticket.OrderedAt,
+            Lines = lines.Select(l => new OrderLineDto
+            {
+                Id = l.Id,
+                TicketId = l.TicketId,
+                MenuItemId = l.MenuItemId,
+                ItemCode = l.ItemCodeSnapshot,
+                ItemName = l.ItemNameSnapshot,
+                Quantity = l.Quantity,
+                UnitPrice = l.UnitPrice,
+                SelectedOptionsText = l.SelectedOptionsText,
+                Note = l.Note,
+                KitchenStation = l.KitchenStation,
+                Status = l.Status.ToString()
+            }).ToList()
+        };
     }
 }

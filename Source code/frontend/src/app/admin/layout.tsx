@@ -22,6 +22,7 @@ import {
   LayoutDashboard,
   Store,
   Layers,
+  ShoppingCart,
 } from "lucide-react";
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -148,6 +149,15 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       active: pathname.startsWith("/admin/tables"),
       allowed: true,
       badge: "STT 14-17",
+      badgeColor: "bg-amber-500/10 text-amber-400 border-amber-500/20",
+    },
+    {
+      name: "POS & Order tại bàn",
+      href: "/admin/pos",
+      icon: ShoppingCart,
+      active: pathname.startsWith("/admin/pos"),
+      allowed: true,
+      badge: "STT 21 (1.6)",
       badgeColor: "bg-amber-500/10 text-amber-400 border-amber-500/20",
     },
     {

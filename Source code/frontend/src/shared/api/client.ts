@@ -345,6 +345,87 @@ export type UpdateMenuItemRequest = {
   options?: CreateOptionRequest[];
 };
 
+// ==========================================
+// ORDER & POS TYPES (STT 21, 22, 23, 24)
+// ==========================================
+
+export type OpenSessionRequest = {
+  tableId: string;
+  guestCount?: number;
+};
+
+export type StaffOrderSelectedOption = {
+  optionId?: string;
+  optionName: string;
+  valueId?: string;
+  valueName: string;
+  extraPrice: number;
+};
+
+export type StaffOrderLineRequest = {
+  menuItemId: string;
+  quantity: number;
+  note?: string;
+  selectedOptions?: StaffOrderSelectedOption[];
+};
+
+export type StaffPlaceOrderRequest = {
+  sessionId: string;
+  note?: string;
+  lines: StaffOrderLineRequest[];
+};
+
+export type QrPlaceOrderRequest = {
+  tableQrToken: string;
+  note?: string;
+  lines: StaffOrderLineRequest[];
+};
+
+export type OrderLineDto = {
+  id: string;
+  ticketId: string;
+  menuItemId: string;
+  itemCode: string;
+  itemName: string;
+  quantity: number;
+  unitPrice: number;
+  totalPrice: number;
+  selectedOptionsText?: string;
+  note?: string;
+  kitchenStation: string;
+  status: "PendingConfirm" | "SentToKitchen" | "Preparing" | "Ready" | "Served" | "Cancelled";
+};
+
+export type OrderTicketDto = {
+  id: string;
+  sessionId: string;
+  ticketNumber: number;
+  source: "StaffAssisted" | "CustomerQr";
+  createdByUserName?: string;
+  note?: string;
+  orderedAt: string;
+  lines: OrderLineDto[];
+  ticketTotal: number;
+};
+
+export type TableSessionDetailDto = {
+  id: string;
+  branchId: string;
+  branchName: string;
+  tableId: string;
+  tableCode: string;
+  tableName: string;
+  areaName: string;
+  sessionCode: string;
+  guestCount: number;
+  status: "Open" | "Paying" | "Closed";
+  openedAt: string;
+  closedAt?: string;
+  tickets: OrderTicketDto[];
+  totalAmount: number;
+  totalItemsCount: number;
+};
+
 function getAuthToken(): string | null {
   if (typeof window === "undefined") return null;
   return localStorage.getItem("orderpum_token");
@@ -622,17 +703,40 @@ export const api = {
       method: "DELETE",
     }),
 
-  // Order helpers
-  staffOrder: (token: string, sessionId: string, lines: { menuItemId: string; quantity: number; note?: string }[]) =>
-    request("/api/orders/staff", {
+  // ==========================================
+  // ORDER & POS (STT 21, 22, 23, 24)
+  // ==========================================
+  openSession: (tableId: string, guestCount = 1) =>
+    request<TableSessionDetailDto>("/api/orders/sessions/open", {
       method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ sessionId, lines }),
+      body: JSON.stringify({ tableId, guestCount }),
     }),
 
-  qrOrder: (tableQrToken: string, lines: { menuItemId: string; quantity: number; note?: string }[]) =>
-    request("/api/orders/qr", {
+  getActiveSessionByTable: (tableId: string) =>
+    request<TableSessionDetailDto>(`/api/orders/sessions/by-table/${tableId}`),
+
+  getSessionById: (sessionId: string) =>
+    request<TableSessionDetailDto>(`/api/orders/sessions/${sessionId}`),
+
+  closeSession: (sessionId: string) =>
+    request<{ success: boolean; message: string }>(`/api/orders/sessions/${sessionId}/close`, {
       method: "POST",
-      body: JSON.stringify({ tableQrToken, lines }),
+    }),
+
+  placeStaffOrder: (data: StaffPlaceOrderRequest) =>
+    request<OrderTicketDto>("/api/orders/staff", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  placeQrOrder: (data: QrPlaceOrderRequest) =>
+    request<OrderTicketDto>("/api/orders/qr", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  confirmQrTicket: (ticketId: string) =>
+    request<void>(`/api/orders/qr/${ticketId}/confirm`, {
+      method: "POST",
     }),
 };
