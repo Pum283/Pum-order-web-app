@@ -1,0 +1,6 @@
+@OrderPum.Api_HostAddress = http://localhost:5006
+
+GET {{OrderPum.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

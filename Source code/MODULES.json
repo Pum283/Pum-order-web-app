@@ -1,0 +1,28 @@
+{
+  "name": "OrderPum",
+  "version": "0.1.0",
+  "description": "Hệ thống order tại bàn — QR khách + NV order hộ",
+  "modules": [
+    { "id": "auth", "name": "Tài khoản & Phân quyền", "enabled": true, "mvp": true },
+    { "id": "branch", "name": "Chi nhánh / chuỗi", "enabled": true, "mvp": true },
+    { "id": "floor", "name": "Khu vực - Tầng - Bàn", "enabled": true, "mvp": true },
+    { "id": "menu", "name": "Thực đơn & Sản phẩm", "enabled": true, "mvp": true },
+    { "id": "order", "name": "Order (QR + NV hộ)", "enabled": true, "mvp": true },
+    { "id": "kitchen", "name": "Bếp / Bar - KDS", "enabled": true, "mvp": true },
+    { "id": "payment", "name": "Thanh toán & Hóa đơn", "enabled": true, "mvp": true },
+    { "id": "promo", "name": "Khuyến mãi", "enabled": true, "mvp": true },
+    { "id": "hrm", "name": "Nhân sự - Ca - Chấm công", "enabled": true, "mvp": true },
+    { "id": "report", "name": "Doanh thu - Báo cáo", "enabled": true, "mvp": true },
+    { "id": "crm", "name": "Khách hàng thân thiết", "enabled": false, "mvp": false },
+    { "id": "notify", "name": "Thông báo realtime", "enabled": true, "mvp": true },
+    { "id": "sys", "name": "Cấu hình & Tích hợp", "enabled": true, "mvp": true },
+    { "id": "inventory", "name": "Kho - NVL - BOM", "enabled": false, "mvp": false }
+  ],
+  "clients": {
+    "api": "backend",
+    "webAdmin": "frontend (route /admin)",
+    "webQrOrder": "frontend (route /order)",
+    "webKds": "frontend (route /kds)",
+    "mobileStaff": "mobile (Expo)"
+  }
+}
