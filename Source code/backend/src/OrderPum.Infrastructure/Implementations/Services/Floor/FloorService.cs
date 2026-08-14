@@ -561,6 +561,11 @@ public class FloorService(AppDbContext dbContext) : IFloorService
 
     public async Task<bool> BatchUpdatePositionsAsync(BatchUpdateTablePositionsRequest request, int userLevel, Guid? userBranchId)
     {
+        if (userLevel > 3)
+        {
+            throw new UnauthorizedAccessException("Chỉ Quản lý (Level 3) hoặc Giám đốc/Chủ nhà hàng mới có quyền thay đổi sơ đồ mặt bằng bàn.");
+        }
+
         if (request.Positions == null || request.Positions.Count == 0) return true;
 
         var tableIds = request.Positions.Select(p => p.TableId).ToList();

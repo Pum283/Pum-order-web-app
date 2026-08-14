@@ -34,8 +34,6 @@ import {
   ArrowRightLeft,
   Move,
   Save,
-  Clock,
-  Coffee,
 } from "lucide-react";
 
 export default function TablesManagementPage() {
@@ -218,6 +216,7 @@ export default function TablesManagementPage() {
   }, [tables]);
 
   const selectedBranch = branches.find((b) => b.id === selectedBranchId);
+  const canManageTables = userRoleLevel <= 3; // Chỉ cấp 1, 2, 3 (Quản lý trở lên) mới được sửa layout, thêm/sửa/xóa bàn và khu vực
 
   // Available destination tables for Transfer
   const availableTargetTables = useMemo(() => {
@@ -458,7 +457,7 @@ export default function TablesManagementPage() {
   // --- FLOOR MAP DRAG & DROP POSITION HANDLERS (STT 16) ---
   const handleFloorMapDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
-    if (!draggedTableId || !floorMapRef.current || !isEditLayoutMode) return;
+    if (!draggedTableId || !floorMapRef.current || !isEditLayoutMode || !canManageTables) return;
 
     const rect = floorMapRef.current.getBoundingClientRect();
     const clientX = e.clientX - rect.left;
@@ -678,22 +677,26 @@ export default function TablesManagementPage() {
             In hàng loạt QR ({filteredTables.length})
           </button>
 
-          <button
-            onClick={handleOpenCreateArea}
-            className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-200 text-xs font-medium border border-stone-700 transition-colors"
-          >
-            <Layers className="w-4 h-4 text-purple-400" />
-            Thêm Khu vực
-          </button>
+          {canManageTables && (
+            <>
+              <button
+                onClick={handleOpenCreateArea}
+                className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-200 text-xs font-medium border border-stone-700 transition-colors"
+              >
+                <Layers className="w-4 h-4 text-purple-400" />
+                Thêm Khu vực
+              </button>
 
-          <button
-            onClick={handleOpenCreateTable}
-            disabled={areas.length === 0}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-stone-950 font-semibold text-xs transition-all shadow-lg shadow-amber-500/20 disabled:opacity-50"
-          >
-            <Plus className="w-4 h-4" />
-            Thêm Bàn mới
-          </button>
+              <button
+                onClick={handleOpenCreateTable}
+                disabled={areas.length === 0}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-stone-950 font-semibold text-xs transition-all shadow-lg shadow-amber-500/20 disabled:opacity-50"
+              >
+                <Plus className="w-4 h-4" />
+                Thêm Bàn mới
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -766,41 +769,45 @@ export default function TablesManagementPage() {
                 </button>
 
                 {/* Edit / Delete small hover buttons */}
-                <div className="hidden group-hover:flex items-center gap-1 ml-1 bg-stone-900/90 border border-stone-800 px-1 py-0.5 rounded-lg">
-                  <button
-                    onClick={(e) => handleOpenEditArea(area, e)}
-                    title="Sửa khu vực"
-                    className="p-1 hover:text-amber-400 text-stone-400"
-                  >
-                    <Edit className="w-3 h-3" />
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setDeleteTarget({ type: "area", id: area.id, name: area.name });
-                    }}
-                    title="Xóa khu vực"
-                    className="p-1 hover:text-rose-400 text-stone-400"
-                  >
-                    <Trash2 className="w-3 h-3" />
-                  </button>
-                </div>
+                {canManageTables && (
+                  <div className="hidden group-hover:flex items-center gap-1 ml-1 bg-stone-900/90 border border-stone-800 px-1 py-0.5 rounded-lg">
+                    <button
+                      onClick={(e) => handleOpenEditArea(area, e)}
+                      title="Sửa khu vực"
+                      className="p-1 hover:text-amber-400 text-stone-400"
+                    >
+                      <Edit className="w-3 h-3" />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeleteTarget({ type: "area", id: area.id, name: area.name });
+                      }}
+                      title="Xóa khu vực"
+                      className="p-1 hover:text-rose-400 text-stone-400"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
           </div>
 
           {/* Search, Status Filter & Floor Map Controls */}
           <div className="flex items-center gap-2">
-            {viewMode === "floormap" && (
+            {viewMode === "floormap" && canManageTables && (
               <div className="flex items-center gap-2 mr-2">
                 {isEditLayoutMode ? (
                   <button
                     onClick={handleSaveFloorPositions}
                     disabled={actionLoading}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-stone-950 text-xs font-semibold shadow-md shadow-emerald-500/20"
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-stone-950 text-xs font-semibold shadow-md shadow-emerald-500/20 ${
+                      hasUnsavedPositions ? "animate-pulse ring-2 ring-emerald-300" : ""
+                    }`}
                   >
                     <Save className="w-3.5 h-3.5" />
-                    {actionLoading ? "Đang lưu..." : "Lưu vị trí"}
+                    {actionLoading ? "Đang lưu..." : hasUnsavedPositions ? "Lưu vị trí mới *" : "Lưu vị trí"}
                   </button>
                 ) : (
                   <button
@@ -959,14 +966,14 @@ export default function TablesManagementPage() {
               return (
                 <div
                   key={table.id}
-                  draggable={isEditLayoutMode}
+                  draggable={isEditLayoutMode && canManageTables}
                   onDragStart={() => setDraggedTableId(table.id)}
                   style={{
                     left: `${table.posX}%`,
                     top: `${table.posY}%`,
                   }}
                   className={`absolute w-36 bg-stone-900 border-2 ${statusTheme.border} ${statusTheme.glow} rounded-2xl shadow-xl transition-transform duration-100 flex flex-col justify-between overflow-hidden ${
-                    isEditLayoutMode ? "cursor-move ring-2 ring-amber-500/50" : "cursor-pointer hover:scale-105"
+                    isEditLayoutMode && canManageTables ? "cursor-move ring-2 ring-amber-500/50" : "cursor-pointer hover:scale-105"
                   }`}
                 >
                   {/* Table Card Header on Map */}
@@ -1146,29 +1153,33 @@ export default function TablesManagementPage() {
                     <QrCode className="w-4 h-4" />
                   </button>
 
-                  <button
-                    onClick={() => handleOpenEditTable(table)}
-                    title="Sửa bàn"
-                    className="p-1.5 rounded-lg text-stone-400 hover:text-stone-200 hover:bg-stone-800 transition-colors"
-                  >
-                    <Edit className="w-4 h-4" />
-                  </button>
+                  {canManageTables && (
+                    <>
+                      <button
+                        onClick={() => handleOpenEditTable(table)}
+                        title="Sửa bàn"
+                        className="p-1.5 rounded-lg text-stone-400 hover:text-stone-200 hover:bg-stone-800 transition-colors"
+                      >
+                        <Edit className="w-4 h-4" />
+                      </button>
 
-                  <button
-                    onClick={() => setRegenerateTarget(table)}
-                    title="Đổi mã Token QR mới"
-                    className="p-1.5 rounded-lg text-stone-400 hover:text-amber-400 hover:bg-stone-800 transition-colors"
-                  >
-                    <KeyRound className="w-4 h-4" />
-                  </button>
+                      <button
+                        onClick={() => setRegenerateTarget(table)}
+                        title="Đổi mã Token QR mới"
+                        className="p-1.5 rounded-lg text-stone-400 hover:text-amber-400 hover:bg-stone-800 transition-colors"
+                      >
+                        <KeyRound className="w-4 h-4" />
+                      </button>
 
-                  <button
-                    onClick={() => setDeleteTarget({ type: "table", id: table.id, name: table.code })}
-                    title="Xóa bàn"
-                    className="p-1.5 rounded-lg text-stone-400 hover:text-rose-400 hover:bg-stone-800 transition-colors"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                      <button
+                        onClick={() => setDeleteTarget({ type: "table", id: table.id, name: table.code })}
+                        title="Xóa bàn"
+                        className="p-1.5 rounded-lg text-stone-400 hover:text-rose-400 hover:bg-stone-800 transition-colors"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             );

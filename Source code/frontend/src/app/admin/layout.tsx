@@ -201,27 +201,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             <div className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-stone-500">
               Quản trị hệ thống
             </div>
-            {navItems.map((item) => {
+            {navItems.filter((item) => item.allowed).map((item) => {
               const Icon = item.icon;
-              if (!item.allowed) {
-                return (
-                  <div
-                    key={item.name}
-                    className="flex items-center justify-between px-3 py-2.5 rounded-xl text-stone-600 cursor-not-allowed text-xs font-medium opacity-60"
-                    title="Bạn không có quyền truy cập chức năng này"
-                  >
-                    <div className="flex items-center gap-3">
-                      <Icon className="w-4 h-4" />
-                      <span>{item.name}</span>
-                    </div>
-                    {item.badge && (
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded border ${item.badgeColor}`}>
-                        {item.badge}
-                      </span>
-                    )}
-                  </div>
-                );
-              }
 
               return (
                 <Link
