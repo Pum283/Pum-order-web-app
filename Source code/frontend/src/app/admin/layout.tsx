@@ -21,6 +21,7 @@ import {
   AlertCircle,
   LayoutDashboard,
   Store,
+  Layers,
 } from "lucide-react";
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -128,16 +129,25 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       icon: Building2,
       active: pathname.startsWith("/admin/branches"),
       allowed: canManageUsers,
-      badge: canManageUsers ? "STT 8, 99, 105" : "Cần cấp QL trở lên",
-      badgeColor: canManageUsers ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" : "bg-stone-800 text-stone-500",
+      badge: "STT 8, 99",
+      badgeColor: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
     },
     {
-      name: "Khu vực, Bàn & QR",
+      name: "Khu vực & Tầng",
+      href: "/admin/areas",
+      icon: Layers,
+      active: pathname.startsWith("/admin/areas"),
+      allowed: canManageUsers,
+      badge: "STT 13",
+      badgeColor: "bg-purple-500/10 text-purple-400 border-purple-500/20",
+    },
+    {
+      name: "Bàn, QR & Sơ đồ",
       href: "/admin/tables",
       icon: QrCode,
       active: pathname.startsWith("/admin/tables"),
       allowed: true,
-      badge: "STT 13, 14, 15",
+      badge: "STT 14-17",
       badgeColor: "bg-amber-500/10 text-amber-400 border-amber-500/20",
     },
     {
