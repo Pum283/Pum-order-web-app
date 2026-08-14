@@ -859,48 +859,24 @@ export default function TablesManagementPage() {
             </button>
 
             {areas.map((area) => (
-              <div key={area.id} className="relative group flex items-center">
-                <button
-                  onClick={() => setSelectedAreaId(area.id)}
-                  className={`px-3.5 py-1.5 rounded-xl text-xs font-medium transition-all flex items-center gap-1.5 ${
-                    selectedAreaId === area.id
-                      ? "bg-amber-500 text-stone-950 font-semibold shadow-md shadow-amber-500/20"
-                      : "bg-stone-900 text-stone-400 hover:text-stone-200 border border-stone-800"
+              <button
+                key={area.id}
+                onClick={() => setSelectedAreaId(area.id)}
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-medium transition-all flex items-center gap-1.5 ${
+                  selectedAreaId === area.id
+                    ? "bg-amber-500 text-stone-950 font-semibold shadow-md shadow-amber-500/20"
+                    : "bg-stone-900 text-stone-400 hover:text-stone-200 border border-stone-800"
+                }`}
+              >
+                <span>{area.name}</span>
+                <span
+                  className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+                    selectedAreaId === area.id ? "bg-amber-600/40 text-stone-950" : "bg-stone-800 text-stone-400"
                   }`}
                 >
-                  <span>{area.name}</span>
-                  <span
-                    className={`text-[10px] px-1.5 py-0.2 rounded-full ${
-                      selectedAreaId === area.id ? "bg-amber-600/40 text-stone-950" : "bg-stone-800 text-stone-400"
-                    }`}
-                  >
-                    {tables.filter((t) => t.areaId === area.id).length}
-                  </span>
-                </button>
-
-                {/* Edit / Delete small hover buttons */}
-                {canManageTables && (
-                  <div className="hidden group-hover:flex items-center gap-1 ml-1 bg-stone-900/90 border border-stone-800 px-1 py-0.5 rounded-lg">
-                    <button
-                      onClick={(e) => handleOpenEditArea(area, e)}
-                      title="Sửa khu vực"
-                      className="p-1 hover:text-amber-400 text-stone-400"
-                    >
-                      <Edit className="w-3 h-3" />
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDeleteTarget({ type: "area", id: area.id, name: area.name });
-                      }}
-                      title="Xóa khu vực"
-                      className="p-1 hover:text-rose-400 text-stone-400"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </button>
-                  </div>
-                )}
-              </div>
+                  {tables.filter((t) => t.areaId === area.id).length}
+                </span>
+              </button>
             ))}
           </div>
 
