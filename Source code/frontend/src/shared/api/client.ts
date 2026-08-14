@@ -426,7 +426,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify(data),
     }),
-  updateTablePositions: (positions: { tableId: string; posX: number; posY: number }[]) =>
+  updateTablePositions: (positions: { tableId: string; areaId?: string; posX: number; posY: number }[]) =>
     request<{ success: boolean; message: string }>("/api/tables/positions", {
       method: "POST",
       body: JSON.stringify({ positions }),

@@ -117,6 +117,7 @@ public class UpdateTableStatusRequest
 public class UpdateTablePositionRequest
 {
     public Guid TableId { get; set; }
+    public Guid? AreaId { get; set; }
     public int PosX { get; set; }
     public int PosY { get; set; }
 }

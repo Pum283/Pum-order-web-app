@@ -34,6 +34,7 @@ import {
   ArrowRightLeft,
   Move,
   Save,
+  Grid,
 } from "lucide-react";
 
 export default function TablesManagementPage() {
@@ -43,7 +44,7 @@ export default function TablesManagementPage() {
   const [userRoleLevel, setUserRoleLevel] = useState<number>(5);
 
   // View Mode: 'grid' | 'floormap'
-  const [viewMode, setViewMode] = useState<"grid" | "floormap">("grid");
+  const [viewMode, setViewMode] = useState<"floormap" | "grid">("floormap");
   const [isEditLayoutMode, setIsEditLayoutMode] = useState<boolean>(false);
 
   // Data states
@@ -92,10 +93,11 @@ export default function TablesManagementPage() {
   const [deleteTarget, setDeleteTarget] = useState<{ type: "area" | "table"; id: string; name: string } | null>(null);
   const [regenerateTarget, setRegenerateTarget] = useState<DiningTableDto | null>(null);
 
-  // Dragging state for Floor Map
+  // Dragging state for Floor Map & Cross-Area drag & drop
   const [draggedTableId, setDraggedTableId] = useState<string | null>(null);
+  const [draggedAreaId, setDraggedAreaId] = useState<string | null>(null);
+  const [dragOverAreaId, setDragOverAreaId] = useState<string | null>(null);
   const [hasUnsavedPositions, setHasUnsavedPositions] = useState<boolean>(false);
-  const floorMapRef = useRef<HTMLDivElement>(null);
 
   // Load User profile & branches on init
   useEffect(() => {
@@ -226,6 +228,14 @@ export default function TablesManagementPage() {
     );
   }, [tables, transferFromTable]);
 
+  // Grouped areas for Floor Map Zones
+  const displayedAreas = useMemo(() => {
+    if (selectedAreaId === "ALL") {
+      return areas;
+    }
+    return areas.filter((a) => a.id === selectedAreaId);
+  }, [areas, selectedAreaId]);
+
   // --- AREA HANDLERS ---
   const handleOpenCreateArea = () => {
     setEditingArea(null);
@@ -302,8 +312,8 @@ export default function TablesManagementPage() {
       code: "",
       name: "",
       capacity: 4,
-      posX: 10 + (tables.length % 5) * 18,
-      posY: 10 + Math.floor(tables.length / 5) * 20,
+      posX: 0,
+      posY: 0,
     });
     setIsTableModalOpen(true);
   };
@@ -454,40 +464,108 @@ export default function TablesManagementPage() {
     }
   };
 
-  // --- FLOOR MAP DRAG & DROP POSITION HANDLERS (STT 16) ---
-  const handleFloorMapDrop = (e: React.DragEvent<HTMLDivElement>) => {
+  // --- CROSS-AREA & TABLE DRAG & DROP HANDLERS ---
+  const handleTableDragStart = (e: React.DragEvent, tableId: string) => {
+    if (!canManageTables) return;
+    setDraggedTableId(tableId);
+    e.dataTransfer.setData("text/plain", tableId);
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleAreaDragOver = (e: React.DragEvent, targetAreaId: string) => {
+    if (!canManageTables || !draggedTableId) return;
     e.preventDefault();
-    if (!draggedTableId || !floorMapRef.current || !isEditLayoutMode || !canManageTables) return;
+    e.dataTransfer.dropEffect = "move";
+    if (dragOverAreaId !== targetAreaId) {
+      setDragOverAreaId(targetAreaId);
+    }
+  };
 
-    const rect = floorMapRef.current.getBoundingClientRect();
-    const clientX = e.clientX - rect.left;
-    const clientY = e.clientY - rect.top;
+  const handleAreaDragLeave = () => {
+    setDragOverAreaId(null);
+  };
 
-    // Convert pixel to percentage (0 - 90%)
-    let posX = Math.round((clientX / rect.width) * 100);
-    let posY = Math.round((clientY / rect.height) * 100);
+  const handleDropOnArea = (e: React.DragEvent, targetArea: AreaDto) => {
+    e.preventDefault();
+    if (!canManageTables || !draggedTableId) return;
 
-    posX = Math.max(2, Math.min(88, posX));
-    posY = Math.max(2, Math.min(88, posY));
+    setDragOverAreaId(null);
+    const targetTable = tables.find((t) => t.id === draggedTableId);
+    if (!targetTable) return;
 
-    setTables((prev) =>
-      prev.map((t) => (t.id === draggedTableId ? { ...t, posX, posY } : t))
-    );
+    if (targetTable.areaId !== targetArea.id) {
+      // Cross-Area move: Move table to new area
+      setTables((prev) =>
+        prev.map((t) =>
+          t.id === draggedTableId
+            ? { ...t, areaId: targetArea.id, areaName: targetArea.name }
+            : t
+        )
+      );
+      setHasUnsavedPositions(true);
+      setSuccessMsg(`Đã di chuyển bàn ${targetTable.code} sang khu vực '${targetArea.name}'. Hãy bấm 'Lưu vị trí' để áp dụng.`);
+    }
+
+    setDraggedTableId(null);
+  };
+
+  const handleReorderTablesInArea = (sourceTableId: string, targetTableId: string, areaId: string) => {
+    if (!canManageTables || sourceTableId === targetTableId) return;
+
+    const areaTables = tables.filter((t) => t.areaId === areaId);
+    const sourceIndex = areaTables.findIndex((t) => t.id === sourceTableId);
+    const targetIndex = areaTables.findIndex((t) => t.id === targetTableId);
+
+    if (sourceIndex < 0 || targetIndex < 0) return;
+
+    const newAreaTables = [...areaTables];
+    const [moved] = newAreaTables.splice(sourceIndex, 1);
+    newAreaTables.splice(targetIndex, 0, moved);
+
+    const otherTables = tables.filter((t) => t.areaId !== areaId);
+    setTables([...otherTables, ...newAreaTables]);
     setHasUnsavedPositions(true);
     setDraggedTableId(null);
+  };
+
+  const handleAreaDragStart = (e: React.DragEvent, areaId: string) => {
+    if (!canManageTables) return;
+    setDraggedAreaId(areaId);
+    e.dataTransfer.setData("text/plain", areaId);
+  };
+
+  const handleDropReorderArea = (e: React.DragEvent, targetAreaId: string) => {
+    e.preventDefault();
+    if (!canManageTables || !draggedAreaId || draggedAreaId === targetAreaId) return;
+
+    const sourceIndex = areas.findIndex((a) => a.id === draggedAreaId);
+    const targetIndex = areas.findIndex((a) => a.id === targetAreaId);
+
+    if (sourceIndex < 0 || targetIndex < 0) return;
+
+    const newAreas = [...areas];
+    const [moved] = newAreas.splice(sourceIndex, 1);
+    newAreas.splice(targetIndex, 0, moved);
+
+    // Update sort orders
+    const updatedAreas = newAreas.map((a, idx) => ({ ...a, sortOrder: idx + 1 }));
+    setAreas(updatedAreas);
+    setHasUnsavedPositions(true);
+    setDraggedAreaId(null);
   };
 
   const handleSaveFloorPositions = async () => {
     setActionLoading(true);
     setErrorMsg(null);
     try {
-      const positions = tables.map((t) => ({
+      const positions = tables.map((t, idx) => ({
         tableId: t.id,
-        posX: t.posX,
-        posY: t.posY,
+        areaId: t.areaId,
+        posX: idx % 10,
+        posY: Math.floor(idx / 10),
       }));
       await api.updateTablePositions(positions);
-      setSuccessMsg("Đã lưu sơ đồ mặt bằng bàn thành công!");
+      setSuccessMsg("Đã lưu sơ đồ mặt bằng và cấu trúc phân vùng thành công!");
       setHasUnsavedPositions(false);
       setIsEditLayoutMode(false);
     } catch (err: unknown) {
@@ -571,6 +649,38 @@ export default function TablesManagementPage() {
     window.print();
   };
 
+  // Color schemes for Floor Zones
+  const ZONE_PALETTES = [
+    {
+      border: "border-amber-500/40 hover:border-amber-500/70",
+      bg: "bg-amber-950/10",
+      headerBg: "bg-amber-500/10 text-amber-300 border-amber-500/20",
+      accent: "text-amber-400",
+      glow: "shadow-amber-500/5",
+    },
+    {
+      border: "border-blue-500/40 hover:border-blue-500/70",
+      bg: "bg-blue-950/10",
+      headerBg: "bg-blue-500/10 text-blue-300 border-blue-500/20",
+      accent: "text-blue-400",
+      glow: "shadow-blue-500/5",
+    },
+    {
+      border: "border-emerald-500/40 hover:border-emerald-500/70",
+      bg: "bg-emerald-950/10",
+      headerBg: "bg-emerald-500/10 text-emerald-300 border-emerald-500/20",
+      accent: "text-emerald-400",
+      glow: "shadow-emerald-500/5",
+    },
+    {
+      border: "border-purple-500/40 hover:border-purple-500/70",
+      bg: "bg-purple-950/10",
+      headerBg: "bg-purple-500/10 text-purple-300 border-purple-500/20",
+      accent: "text-purple-400",
+      glow: "shadow-purple-500/5",
+    },
+  ];
+
   return (
     <div className="space-y-6">
       {/* Toast Alert */}
@@ -609,11 +719,11 @@ export default function TablesManagementPage() {
               <div className="flex items-center gap-2.5">
                 <h1 className="text-xl font-bold text-stone-100">Khu vực, Bàn & Sơ đồ mặt bằng</h1>
                 <span className="text-xs px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-medium">
-                  STT 13, 14, 15, 16, 17 (MVP)
+                  STT 13, 14, 15, 16, 17
                 </span>
               </div>
               <p className="text-xs text-stone-400 mt-1">
-                Sơ đồ bàn trực quan (Floor map), trạng thái phục vụ realtime, chuyển bàn và xuất mã QR gọi món
+                Kéo thả vị trí bàn trực quan bằng chuột, phân vùng tầng/khu vực không gian và chuyển bàn tức thì
               </p>
             </div>
           </div>
@@ -645,17 +755,6 @@ export default function TablesManagementPage() {
           {/* View Mode Toggle */}
           <div className="flex items-center bg-stone-950 p-1 rounded-xl border border-stone-800">
             <button
-              onClick={() => setViewMode("grid")}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                viewMode === "grid"
-                  ? "bg-amber-500 text-stone-950 font-semibold shadow-md"
-                  : "text-stone-400 hover:text-stone-200"
-              }`}
-            >
-              <LayoutGrid className="w-3.5 h-3.5" />
-              <span>Dạng lưới</span>
-            </button>
-            <button
               onClick={() => setViewMode("floormap")}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
                 viewMode === "floormap"
@@ -664,7 +763,18 @@ export default function TablesManagementPage() {
               }`}
             >
               <Map className="w-3.5 h-3.5" />
-              <span>Sơ đồ tầng (STT 16)</span>
+              <span>Sơ đồ mặt bằng</span>
+            </button>
+            <button
+              onClick={() => setViewMode("grid")}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                viewMode === "grid"
+                  ? "bg-amber-500 text-stone-950 font-semibold shadow-md"
+                  : "text-stone-400 hover:text-stone-200"
+              }`}
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
+              <span>Dạng thẻ</span>
             </button>
           </div>
 
@@ -807,7 +917,7 @@ export default function TablesManagementPage() {
                     }`}
                   >
                     <Save className="w-3.5 h-3.5" />
-                    {actionLoading ? "Đang lưu..." : hasUnsavedPositions ? "Lưu vị trí mới *" : "Lưu vị trí"}
+                    {actionLoading ? "Đang lưu..." : hasUnsavedPositions ? "Lưu sơ đồ mới *" : "Đã lưu sơ đồ"}
                   </button>
                 ) : (
                   <button
@@ -815,7 +925,7 @@ export default function TablesManagementPage() {
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-amber-400 text-xs font-medium border border-stone-700"
                   >
                     <Move className="w-3.5 h-3.5" />
-                    Kéo thả vị trí bàn
+                    Kéo thả bố trí vùng & bàn
                   </button>
                 )}
               </div>
@@ -847,194 +957,308 @@ export default function TablesManagementPage() {
         </div>
       </div>
 
-      {/* Main Content: Floor Map or Grid */}
+      {/* Main Content: Floor Map with Area Zones or Grid */}
       {loading ? (
         <div className="flex flex-col items-center justify-center p-16 bg-stone-900/30 border border-stone-800/80 rounded-2xl">
           <RefreshCw className="w-8 h-8 text-amber-500 animate-spin mb-3" />
           <p className="text-sm text-stone-400">Đang tải danh sách bàn và sơ đồ mặt bằng...</p>
         </div>
-      ) : filteredTables.length === 0 ? (
+      ) : areas.length === 0 ? (
         <div className="flex flex-col items-center justify-center p-16 bg-stone-900/30 border border-stone-800/80 rounded-2xl text-center">
           <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center mb-4">
             <LayoutGrid className="w-7 h-7" />
           </div>
-          <h3 className="text-base font-semibold text-stone-200">Không tìm thấy bàn nào</h3>
+          <h3 className="text-base font-semibold text-stone-200">Chưa có khu vực nào</h3>
           <p className="text-xs text-stone-400 max-w-md mt-1 mb-5">
-            {areas.length === 0
-              ? "Chi nhánh này chưa có khu vực nào. Hãy tạo khu vực trước khi thêm bàn."
-              : "Chưa có bàn nào phù hợp với bộ lọc hiện tại. Bấm nút bên dưới để thêm bàn mới."}
+            Chi nhánh này chưa có khu vực/tầng nào. Hãy tạo khu vực trước để thiết lập bàn và sơ đồ mặt bằng.
           </p>
-          {areas.length === 0 ? (
+          {canManageTables && (
             <button
               onClick={handleOpenCreateArea}
               className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-stone-950 text-xs font-semibold"
             >
               Tạo Khu vực đầu tiên
             </button>
-          ) : (
-            <button
-              onClick={handleOpenCreateTable}
-              className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-stone-950 text-xs font-semibold"
-            >
-              Thêm Bàn vào khu vực
-            </button>
           )}
         </div>
       ) : viewMode === "floormap" ? (
         /* ======================================================== */
-        /* INTERACTIVE FLOOR MAP VIEW (STT 16) */
+        /* INTERACTIVE FLOOR MAP WITH AREA ZONES (STT 16) */
         /* ======================================================== */
-        <div className="space-y-3">
-          {isEditLayoutMode && (
-            <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Move className="w-4 h-4 text-amber-400 shrink-0" />
-                <span>
-                  <strong>Chế độ chỉnh sửa sơ đồ:</strong> Bạn có thể nắm và kéo thả bất kỳ bàn nào trên mặt bằng bên dưới để sắp xếp vị trí thực tế của quán, sau đó bấm <strong>Lưu vị trí</strong>.
-                </span>
+        <div className="space-y-4">
+          {/* Instructions banner when in drag & drop mode */}
+          {isEditLayoutMode && canManageTables && (
+            <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-lg bg-amber-500/20 text-amber-400 shrink-0">
+                  <Move className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="font-bold text-amber-200">Chế độ Kéo Thả Bố Trí Sơ Đồ Trực Quan:</div>
+                  <div className="text-[11px] text-amber-300/80 mt-0.5">
+                    • <strong>Kéo bàn sang Vùng khác</strong>: Nắm bàn và kéo thả vào khung Khu vực khác để chuyển vùng cho bàn.
+                    <br />• <strong>Sắp xếp bàn trong Vùng</strong>: Kéo thả giữa các bàn để đổi vị trí thứ tự hiển thị.
+                    <br />• <strong>Sắp xếp các Tầng/Vùng</strong>: Nắm biểu tượng góc trên của Vùng để kéo đổi thứ tự khu vực.
+                  </div>
+                </div>
               </div>
               <button
                 onClick={handleSaveFloorPositions}
                 disabled={actionLoading}
-                className="px-3.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-stone-950 font-bold text-xs"
+                className="shrink-0 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-stone-950 font-bold text-xs shadow-md shadow-amber-500/20 flex items-center gap-1.5"
               >
-                {actionLoading ? "Đang lưu..." : "Lưu ngay"}
+                <Save className="w-3.5 h-3.5" />
+                <span>{actionLoading ? "Đang lưu..." : "Lưu Thay Đổi"}</span>
               </button>
             </div>
           )}
 
-          <div
-            ref={floorMapRef}
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={handleFloorMapDrop}
-            className="relative w-full h-[620px] bg-stone-950/80 border-2 border-dashed border-stone-800 rounded-2xl overflow-hidden p-6 shadow-inner select-none"
-            style={{
-              backgroundImage: "radial-gradient(#292524 1px, transparent 1px)",
-              backgroundSize: "24px 24px",
-            }}
-          >
-            {/* Floor Map Legend / Status indicators */}
-            <div className="absolute top-4 left-4 z-10 flex items-center gap-3 bg-stone-900/90 border border-stone-800 px-3.5 py-2 rounded-xl backdrop-blur-md text-[11px]">
-              <span className="flex items-center gap-1 text-emerald-400">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-md shadow-emerald-500/50"></span> Trống
-              </span>
-              <span className="flex items-center gap-1 text-amber-400">
-                <span className="w-2.5 h-2.5 rounded-full bg-amber-500 shadow-md shadow-amber-500/50"></span> Có khách
-              </span>
-              <span className="flex items-center gap-1 text-blue-400">
-                <span className="w-2.5 h-2.5 rounded-full bg-blue-500 shadow-md shadow-blue-500/50"></span> Đã đặt
-              </span>
-              <span className="flex items-center gap-1 text-rose-400">
-                <span className="w-2.5 h-2.5 rounded-full bg-rose-500 shadow-md shadow-rose-500/50"></span> Cần dọn
-              </span>
-            </div>
-
-            {/* Render Floor Map Dining Tables */}
-            {filteredTables.map((table) => {
-              const statusTheme = {
-                Available: {
-                  border: "border-emerald-500/40 hover:border-emerald-500 shadow-emerald-500/10",
-                  headerBg: "bg-emerald-950/80 text-emerald-300",
-                  badge: "bg-emerald-500 text-stone-950",
-                  glow: "shadow-emerald-950/40",
-                },
-                Occupied: {
-                  border: "border-amber-500/60 hover:border-amber-500 shadow-amber-500/20",
-                  headerBg: "bg-amber-950/80 text-amber-300",
-                  badge: "bg-amber-500 text-stone-950",
-                  glow: "shadow-amber-950/60 animate-pulse",
-                },
-                Reserved: {
-                  border: "border-blue-500/40 hover:border-blue-500 shadow-blue-500/10",
-                  headerBg: "bg-blue-950/80 text-blue-300",
-                  badge: "bg-blue-500 text-stone-950",
-                  glow: "shadow-blue-950/40",
-                },
-                NeedsCleaning: {
-                  border: "border-rose-500/40 hover:border-rose-500 shadow-rose-500/10",
-                  headerBg: "bg-rose-950/80 text-rose-300",
-                  badge: "bg-rose-500 text-white",
-                  glow: "shadow-rose-950/40",
-                },
-              }[table.status] || {
-                border: "border-stone-700",
-                headerBg: "bg-stone-800 text-stone-300",
-                badge: "bg-stone-600 text-white",
-                glow: "",
-              };
+          {/* Area Zones Container Grid */}
+          <div className="space-y-6">
+            {displayedAreas.map((area, areaIdx) => {
+              const areaTables = filteredTables.filter((t) => t.areaId === area.id);
+              const palette = ZONE_PALETTES[areaIdx % ZONE_PALETTES.length];
+              const isOverThisArea = dragOverAreaId === area.id;
 
               return (
                 <div
-                  key={table.id}
+                  key={area.id}
                   draggable={isEditLayoutMode && canManageTables}
-                  onDragStart={() => setDraggedTableId(table.id)}
-                  style={{
-                    left: `${table.posX}%`,
-                    top: `${table.posY}%`,
+                  onDragStart={(e) => handleAreaDragStart(e, area.id)}
+                  onDragOver={(e) => handleAreaDragOver(e, area.id)}
+                  onDragLeave={handleAreaDragLeave}
+                  onDrop={(e) => {
+                    if (draggedTableId) {
+                      handleDropOnArea(e, area);
+                    } else if (draggedAreaId) {
+                      handleDropReorderArea(e, area.id);
+                    }
                   }}
-                  className={`absolute w-36 bg-stone-900 border-2 ${statusTheme.border} ${statusTheme.glow} rounded-2xl shadow-xl transition-transform duration-100 flex flex-col justify-between overflow-hidden ${
-                    isEditLayoutMode && canManageTables ? "cursor-move ring-2 ring-amber-500/50" : "cursor-pointer hover:scale-105"
+                  className={`relative rounded-2xl border-2 ${palette.border} ${palette.bg} ${palette.glow} p-5 transition-all duration-200 ${
+                    isOverThisArea
+                      ? "ring-4 ring-amber-500/60 bg-amber-500/10 border-amber-500 scale-[1.008]"
+                      : ""
                   }`}
+                  style={{
+                    backgroundImage: "radial-gradient(#292524 1px, transparent 1px)",
+                    backgroundSize: "20px 20px",
+                  }}
                 >
-                  {/* Table Card Header on Map */}
-                  <div className={`px-2.5 py-1.5 ${statusTheme.headerBg} flex items-center justify-between border-b border-stone-800/80`}>
-                    <span className="font-black text-xs font-mono">{table.code}</span>
-                    <span className="text-[10px] px-1.5 py-0.2 rounded-full font-bold flex items-center gap-1">
-                      <Users className="w-2.5 h-2.5" />
-                      {table.capacity}
-                    </span>
-                  </div>
-
-                  {/* Body Info */}
-                  <div className="p-2 text-center">
-                    <div className="text-[11px] font-bold text-stone-200 truncate">
-                      {table.name || table.code}
-                    </div>
-                    <div className="text-[9px] text-stone-400 truncate">{table.areaName}</div>
-
-                    {/* Quick action buttons in Map view */}
-                    <div className="mt-2 flex items-center justify-center gap-1 pt-1.5 border-t border-stone-800/60">
-                      {table.status === "Occupied" ? (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleOpenTransferModal(table);
-                          }}
-                          title="Chuyển bàn này (STT 17)"
-                          className="px-2 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 text-[10px] font-bold flex items-center gap-1 border border-amber-500/30"
+                  {/* Area Zone Header */}
+                  <div className="flex flex-wrap items-center justify-between gap-3 pb-3 mb-4 border-b border-stone-800/80">
+                    <div className="flex items-center gap-3">
+                      {isEditLayoutMode && canManageTables && (
+                        <div
+                          title="Nắm để kéo đổi thứ tự khu vực"
+                          className="cursor-move p-1.5 rounded-lg bg-stone-900 border border-stone-800 text-stone-400 hover:text-amber-400"
                         >
-                          <ArrowRightLeft className="w-3 h-3" />
-                          <span>Chuyển</span>
-                        </button>
-                      ) : (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setActiveQrTable(table);
-                            setIsQrModalOpen(true);
-                          }}
-                          title="Xem mã QR bàn"
-                          className="p-1 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-300 text-[10px]"
-                        >
-                          <QrCode className="w-3.5 h-3.5" />
-                        </button>
+                          <Grid className="w-4 h-4" />
+                        </div>
                       )}
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className={`text-base font-black tracking-tight ${palette.accent}`}>
+                            {area.name}
+                          </h3>
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-stone-900 text-stone-300 border border-stone-800 font-bold">
+                            {areaTables.length} bàn
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-stone-400 mt-0.5">
+                          Khu vực bàn thuộc {selectedBranch?.name || "Chi nhánh"}
+                        </p>
+                      </div>
+                    </div>
 
-                      <select
-                        value={table.status}
-                        onChange={(e) => {
-                          e.stopPropagation();
-                          handleQuickStatusChange(table.id, e.target.value);
-                        }}
-                        className="bg-stone-950 text-[10px] border border-stone-800 rounded-lg px-1 py-0.5 text-stone-300 focus:outline-none"
-                      >
-                        <option value="Available">Trống</option>
-                        <option value="Occupied">Khách</option>
-                        <option value="Reserved">Đặt</option>
-                        <option value="NeedsCleaning">Dọn</option>
-                      </select>
+                    <div className="flex items-center gap-2 text-xs">
+                      {canManageTables && (
+                        <>
+                          <button
+                            onClick={(e) => handleOpenEditArea(area, e)}
+                            className="p-1.5 rounded-lg bg-stone-900/80 hover:bg-stone-800 text-stone-400 hover:text-amber-400 border border-stone-800"
+                            title="Sửa khu vực"
+                          >
+                            <Edit className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => {
+                              setTableFormData({
+                                areaId: area.id,
+                                code: "",
+                                name: "",
+                                capacity: 4,
+                                posX: 0,
+                                posY: 0,
+                              });
+                              setEditingTable(null);
+                              setIsTableModalOpen(true);
+                            }}
+                            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/20 font-bold text-[11px]"
+                          >
+                            <Plus className="w-3 h-3" />
+                            <span>Thêm bàn vào vùng này</span>
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
+
+                  {/* Tables in Area Grid */}
+                  {areaTables.length === 0 ? (
+                    <div
+                      onDragOver={(e) => handleAreaDragOver(e, area.id)}
+                      onDrop={(e) => handleDropOnArea(e, area)}
+                      className={`h-36 rounded-xl border-2 border-dashed border-stone-800/80 flex flex-col items-center justify-center text-center p-4 transition-colors ${
+                        isOverThisArea ? "bg-amber-500/20 border-amber-500" : "bg-stone-950/40"
+                      }`}
+                    >
+                      <Layers className="w-6 h-6 text-stone-600 mb-2" />
+                      <p className="text-xs text-stone-400 font-medium">
+                        Khu vực này hiện chưa có bàn nào.
+                      </p>
+                      <p className="text-[11px] text-stone-500 mt-0.5">
+                        {isEditLayoutMode
+                          ? "Kéo thả bàn từ vùng khác vào đây để gán vào khu vực này."
+                          : "Bấm nút 'Thêm bàn vào vùng này' để tạo bàn mới."}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5">
+                      {areaTables.map((table) => {
+                        const statusTheme = {
+                          Available: {
+                            border: "border-emerald-500/40 hover:border-emerald-500 shadow-emerald-500/10",
+                            headerBg: "bg-emerald-950/80 text-emerald-300",
+                            badge: "bg-emerald-500 text-stone-950",
+                            glow: "shadow-emerald-950/30",
+                            dotColor: "bg-emerald-500",
+                          },
+                          Occupied: {
+                            border: "border-amber-500/60 hover:border-amber-500 shadow-amber-500/20",
+                            headerBg: "bg-amber-950/80 text-amber-300",
+                            badge: "bg-amber-500 text-stone-950",
+                            glow: "shadow-amber-950/50 ring-1 ring-amber-500/40 animate-pulse",
+                            dotColor: "bg-amber-500",
+                          },
+                          Reserved: {
+                            border: "border-blue-500/40 hover:border-blue-500 shadow-blue-500/10",
+                            headerBg: "bg-blue-950/80 text-blue-300",
+                            badge: "bg-blue-500 text-stone-950",
+                            glow: "shadow-blue-950/30",
+                            dotColor: "bg-blue-500",
+                          },
+                          NeedsCleaning: {
+                            border: "border-rose-500/40 hover:border-rose-500 shadow-rose-500/10",
+                            headerBg: "bg-rose-950/80 text-rose-300",
+                            badge: "bg-rose-500 text-white",
+                            glow: "shadow-rose-950/30",
+                            dotColor: "bg-rose-500",
+                          },
+                        }[table.status] || {
+                          border: "border-stone-700",
+                          headerBg: "bg-stone-800 text-stone-300",
+                          badge: "bg-stone-600 text-white",
+                          glow: "",
+                          dotColor: "bg-stone-500",
+                        };
+
+                        const isBeingDragged = draggedTableId === table.id;
+
+                        return (
+                          <div
+                            key={table.id}
+                            draggable={canManageTables}
+                            onDragStart={(e) => handleTableDragStart(e, table.id)}
+                            onDragOver={(e) => {
+                              if (canManageTables && draggedTableId && draggedTableId !== table.id) {
+                                e.preventDefault();
+                              }
+                            }}
+                            onDrop={(e) => {
+                              if (canManageTables && draggedTableId && draggedTableId !== table.id) {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                handleReorderTablesInArea(draggedTableId, table.id, area.id);
+                              }
+                            }}
+                            className={`group relative bg-stone-900/90 border-2 ${statusTheme.border} ${statusTheme.glow} rounded-2xl shadow-lg transition-all duration-150 flex flex-col justify-between overflow-hidden select-none ${
+                              canManageTables
+                                ? "cursor-grab active:cursor-grabbing hover:scale-[1.02] hover:shadow-2xl"
+                                : "cursor-pointer"
+                            } ${isBeingDragged ? "opacity-40 scale-95 ring-2 ring-amber-400" : ""}`}
+                          >
+                            {/* Table Card Header */}
+                            <div
+                              className={`px-3 py-2 ${statusTheme.headerBg} flex items-center justify-between border-b border-stone-800/80`}
+                            >
+                              <div className="flex items-center gap-1.5 font-black text-sm font-mono tracking-wider">
+                                <span className={`w-2 h-2 rounded-full ${statusTheme.dotColor}`}></span>
+                                <span>{table.code}</span>
+                              </div>
+                              <span className="text-[10px] px-1.5 py-0.5 rounded-md font-bold flex items-center gap-1 bg-stone-950/40">
+                                <Users className="w-3 h-3" />
+                                {table.capacity}
+                              </span>
+                            </div>
+
+                            {/* Table Card Body */}
+                            <div className="p-3 text-center">
+                              <div className="text-xs font-bold text-stone-200 truncate">
+                                {table.name || table.code}
+                              </div>
+                              <div className="text-[10px] text-stone-400 truncate mt-0.5">
+                                {table.areaName}
+                              </div>
+
+                              {/* Quick Action Buttons */}
+                              <div className="mt-3 flex items-center justify-between gap-1 pt-2 border-t border-stone-800/80">
+                                {table.status === "Occupied" ? (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleOpenTransferModal(table);
+                                    }}
+                                    title="Chuyển bàn này (STT 17)"
+                                    className="flex-1 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-stone-950 text-[10px] font-black flex items-center justify-center gap-1 shadow-sm transition"
+                                  >
+                                    <ArrowRightLeft className="w-3 h-3" />
+                                    <span>Chuyển</span>
+                                  </button>
+                                ) : (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setActiveQrTable(table);
+                                      setIsQrModalOpen(true);
+                                    }}
+                                    title="Xem mã QR gọi món"
+                                    className="flex-1 py-1 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-300 hover:text-amber-400 text-[10px] font-semibold flex items-center justify-center gap-1 transition"
+                                  >
+                                    <QrCode className="w-3 h-3" />
+                                    <span>QR</span>
+                                  </button>
+                                )}
+
+                                <select
+                                  value={table.status}
+                                  onChange={(e) => {
+                                    e.stopPropagation();
+                                    handleQuickStatusChange(table.id, e.target.value);
+                                  }}
+                                  className="bg-stone-950 text-[10px] border border-stone-800 rounded-lg px-1.5 py-1 text-stone-300 focus:outline-none cursor-pointer"
+                                >
+                                  <option value="Available">Trống</option>
+                                  <option value="Occupied">Khách</option>
+                                  <option value="Reserved">Đặt</option>
+                                  <option value="NeedsCleaning">Dọn</option>
+                                </select>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -1106,14 +1330,14 @@ export default function TablesManagementPage() {
                     </select>
                   </div>
 
-                  {/* Info: Capacity & Coordinates */}
+                  {/* Info: Capacity & Area */}
                   <div className="flex items-center justify-between text-xs text-stone-400 py-2 border-y border-stone-800/80">
                     <div className="flex items-center gap-1.5">
                       <Users className="w-3.5 h-3.5 text-stone-500" />
                       <span>{table.capacity} khách</span>
                     </div>
                     <div className="text-[11px] text-stone-500 font-mono">
-                      Vị trí: ({table.posX}%, {table.posY}%)
+                      Khu vực: {table.areaName}
                     </div>
                   </div>
                 </div>
@@ -1337,7 +1561,7 @@ export default function TablesManagementPage() {
                   onChange={(e) => setAreaFormData({ ...areaFormData, sortOrder: Number(e.target.value) })}
                   className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3.5 py-2.5 text-sm text-stone-100 focus:outline-none focus:border-amber-500"
                 />
-                <p className="text-[11px] text-stone-500 mt-1">Số nhỏ hơn sẽ hiển thị trước trên thanh tab</p>
+                <p className="text-[11px] text-stone-500 mt-1">Số nhỏ hơn sẽ hiển thị trước trên sơ đồ</p>
               </div>
 
               <div className="flex items-center justify-end gap-3 pt-3 border-t border-stone-800">
@@ -1447,27 +1671,6 @@ export default function TablesManagementPage() {
                   onChange={(e) => setTableFormData({ ...tableFormData, name: e.target.value })}
                   className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3.5 py-2.5 text-sm text-stone-100 focus:outline-none focus:border-amber-500"
                 />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-stone-300 mb-1.5">Tọa độ X (Floor Map %)</label>
-                  <input
-                    type="number"
-                    value={tableFormData.posX}
-                    onChange={(e) => setTableFormData({ ...tableFormData, posX: Number(e.target.value) })}
-                    className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3.5 py-2.5 text-sm text-stone-100 focus:outline-none focus:border-amber-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-stone-300 mb-1.5">Tọa độ Y (Floor Map %)</label>
-                  <input
-                    type="number"
-                    value={tableFormData.posY}
-                    onChange={(e) => setTableFormData({ ...tableFormData, posY: Number(e.target.value) })}
-                    className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3.5 py-2.5 text-sm text-stone-100 focus:outline-none focus:border-amber-500"
-                  />
-                </div>
               </div>
 
               <div className="flex items-center justify-end gap-3 pt-3 border-t border-stone-800">

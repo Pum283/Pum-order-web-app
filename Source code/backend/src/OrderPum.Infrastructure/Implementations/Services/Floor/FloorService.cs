@@ -579,6 +579,10 @@ public class FloorService(AppDbContext dbContext) : IFloorService
                 ValidateBranchAccess(table.BranchId, userLevel, userBranchId);
                 table.PosX = pos.PosX;
                 table.PosY = pos.PosY;
+                if (pos.AreaId.HasValue && pos.AreaId.Value != Guid.Empty && pos.AreaId.Value != table.AreaId)
+                {
+                    table.AreaId = pos.AreaId.Value;
+                }
                 table.UpdatedAt = DateTime.UtcNow;
             }
         }
