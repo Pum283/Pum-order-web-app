@@ -100,10 +100,60 @@ export type PagedResult<T> = {
 
 export type BranchDto = {
   id: string;
+  code: string;
   name: string;
   address?: string;
   phone?: string;
+  openHours?: string;
+  imageUrl?: string;
+  taxRatePercent: number;
+  serviceChargePercent: number;
+  currency: string;
+  isTaxIncludedInPrice: boolean;
+  isServiceChargeIncluded: boolean;
+  receiptHeaderNote?: string;
+  receiptFooterNote?: string;
   isActive: boolean;
+  staffCount: number;
+  tableCount: number;
+  createdAt: string;
+  updatedAt: string | null;
+};
+
+export type CreateBranchRequest = {
+  code: string;
+  name: string;
+  address?: string;
+  phone?: string;
+  openHours?: string;
+  imageUrl?: string;
+  taxRatePercent?: number;
+  serviceChargePercent?: number;
+  currency?: string;
+  isTaxIncludedInPrice?: boolean;
+  isServiceChargeIncluded?: boolean;
+  receiptHeaderNote?: string;
+  receiptFooterNote?: string;
+  isActive?: boolean;
+};
+
+export type UpdateBranchRequest = {
+  name: string;
+  address?: string;
+  phone?: string;
+  openHours?: string;
+  imageUrl?: string;
+  isActive: boolean;
+};
+
+export type UpdateFinancialConfigRequest = {
+  taxRatePercent: number;
+  serviceChargePercent: number;
+  currency: string;
+  isTaxIncludedInPrice: boolean;
+  isServiceChargeIncluded: boolean;
+  receiptHeaderNote?: string;
+  receiptFooterNote?: string;
 };
 
 function getAuthToken(): string | null {
@@ -231,10 +281,41 @@ export const api = {
       method: "DELETE",
     }),
 
-  // Branches
-  getBranches: () => request<BranchDto[]>("/api/branches"),
+  // Branches CRUD & Financial Configuration (STT 8, 99, 105)
+  getBranches: (includeInactive = false) =>
+    request<BranchDto[]>(`/api/branches?includeInactive=${includeInactive}`),
 
-  // Existing order helpers
+  getBranchById: (id: string) => request<BranchDto>(`/api/branches/${id}`),
+
+  createBranch: (data: CreateBranchRequest) =>
+    request<BranchDto>("/api/branches", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  updateBranch: (id: string, data: UpdateBranchRequest) =>
+    request<BranchDto>(`/api/branches/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  updateBranchFinancialConfig: (id: string, data: UpdateFinancialConfigRequest) =>
+    request<BranchDto>(`/api/branches/${id}/financial-config`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  toggleBranchActive: (id: string) =>
+    request<{ isActive: boolean; message: string }>(`/api/branches/${id}/toggle-active`, {
+      method: "PATCH",
+    }),
+
+  deleteBranch: (id: string) =>
+    request<{ message: string }>(`/api/branches/${id}`, {
+      method: "DELETE",
+    }),
+
+  // Order helpers
   staffOrder: (token: string, sessionId: string, lines: { menuItemId: string; quantity: number; note?: string }[]) =>
     request("/api/orders/staff", {
       method: "POST",

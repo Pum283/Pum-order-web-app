@@ -4,11 +4,13 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
 using OrderPum.Application.Interfaces.Services.Auth;
+using OrderPum.Application.Interfaces.Services.Branch;
 using OrderPum.Application.Interfaces.Services.Order;
 using OrderPum.Domain.Entities.Auth;
 using OrderPum.Domain.Entities.Branch;
 using OrderPum.Domain.Enums.Auth;
 using OrderPum.Infrastructure.Implementations.Services.Auth;
+using OrderPum.Infrastructure.Implementations.Services.Branch;
 using OrderPum.Infrastructure.Implementations.Services.Order;
 using OrderPum.Infrastructure.Persistence;
 using OrderPum.Infrastructure.Security;
@@ -28,6 +30,7 @@ public static class DependencyInjection
 
         services.AddScoped<IJwtTokenService, JwtTokenService>();
         services.AddScoped<IRoleService, RoleService>();
+        services.AddScoped<IBranchService, BranchService>();
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IOrderService, OrderService>();
 
@@ -58,6 +61,25 @@ public static class DependencyInjection
 
         // Tự động tạo cơ sở dữ liệu và bảng nếu chưa tồn tại
         await db.Database.EnsureCreatedAsync();
+
+        // Tự động cập nhật cột mới nếu bảng Branches đã tồn tại từ trước
+        await db.Database.ExecuteSqlRawAsync(@"
+            IF EXISTS (SELECT * FROM sys.tables WHERE name = 'Branches')
+            BEGIN
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Branches') AND name = 'Code')
+                    ALTER TABLE [Branches] ADD [Code] NVARCHAR(50) NOT NULL DEFAULT '';
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Branches') AND name = 'ImageUrl')
+                    ALTER TABLE [Branches] ADD [ImageUrl] NVARCHAR(MAX) NULL;
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Branches') AND name = 'IsTaxIncludedInPrice')
+                    ALTER TABLE [Branches] ADD [IsTaxIncludedInPrice] BIT NOT NULL DEFAULT 0;
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Branches') AND name = 'IsServiceChargeIncluded')
+                    ALTER TABLE [Branches] ADD [IsServiceChargeIncluded] BIT NOT NULL DEFAULT 0;
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Branches') AND name = 'ReceiptHeaderNote')
+                    ALTER TABLE [Branches] ADD [ReceiptHeaderNote] NVARCHAR(500) NULL;
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Branches') AND name = 'ReceiptFooterNote')
+                    ALTER TABLE [Branches] ADD [ReceiptFooterNote] NVARCHAR(500) NULL;
+            END
+        ");
 
         // 1. Seed Bảng Roles (Bảng Vai trò động trong CSDL)
         var systemRoles = new List<Role>
@@ -141,18 +163,19 @@ public static class DependencyInjection
         }
         await db.SaveChangesAsync();
 
-        // Lấy map roleCode -> Role entity
         var roleMap = await db.Roles.ToDictionaryAsync(r => r.Code, r => r);
 
-        // 2. Seed Chi nhánh mẫu
+        // 2. Seed Chi nhánh mẫu với cấu hình tài chính chuẩn
         Branch branchQ1;
         Branch branchHN;
 
-        if (!await db.Branches.AnyAsync())
+        var existingBranches = await db.Branches.OrderBy(b => b.CreatedAt).ToListAsync();
+        if (existingBranches.Count == 0)
         {
             branchQ1 = new Branch
             {
                 Id = Guid.NewGuid(),
+                Code = "CN01",
                 Name = "Chi nhánh 1 - Bến Nghé, Quận 1 (TP.HCM)",
                 Address = "Số 12 Lê Lợi, Phường Bến Nghé, Quận 1, TP. Hồ Chí Minh",
                 Phone = "028 3822 1234",
@@ -160,6 +183,10 @@ public static class DependencyInjection
                 TaxRatePercent = 8,
                 ServiceChargePercent = 5,
                 Currency = "VND",
+                IsTaxIncludedInPrice = false,
+                IsServiceChargeIncluded = false,
+                ReceiptHeaderNote = "OrderPum Bến Nghé - Chúc quý khách ngon miệng!",
+                ReceiptFooterNote = "Cảm ơn quý khách và hẹn gặp lại!",
                 IsActive = true,
                 CreatedAt = DateTime.UtcNow
             };
@@ -167,6 +194,7 @@ public static class DependencyInjection
             branchHN = new Branch
             {
                 Id = Guid.NewGuid(),
+                Code = "CN02",
                 Name = "Chi nhánh 2 - Cầu Giấy (Hà Nội)",
                 Address = "Số 88 Cầu Giấy, Phường Quan Hoa, Quận Cầu Giấy, TP. Hà Nội",
                 Phone = "024 3766 5678",
@@ -174,6 +202,10 @@ public static class DependencyInjection
                 TaxRatePercent = 8,
                 ServiceChargePercent = 5,
                 Currency = "VND",
+                IsTaxIncludedInPrice = false,
+                IsServiceChargeIncluded = false,
+                ReceiptHeaderNote = "OrderPum Cầu Giấy - Hân hạnh phục vụ quý khách!",
+                ReceiptFooterNote = "Cảm ơn quý khách và hẹn gặp lại!",
                 IsActive = true,
                 CreatedAt = DateTime.UtcNow
             };
@@ -183,8 +215,38 @@ public static class DependencyInjection
         }
         else
         {
-            branchQ1 = await db.Branches.OrderBy(b => b.CreatedAt).FirstAsync();
-            branchHN = await db.Branches.OrderBy(b => b.CreatedAt).Skip(1).FirstOrDefaultAsync() ?? branchQ1;
+            branchQ1 = existingBranches[0];
+            if (string.IsNullOrEmpty(branchQ1.Code))
+            {
+                branchQ1.Code = "CN01";
+            }
+            if (existingBranches.Count > 1)
+            {
+                branchHN = existingBranches[1];
+                if (string.IsNullOrEmpty(branchHN.Code))
+                {
+                    branchHN.Code = "CN02";
+                }
+            }
+            else
+            {
+                branchHN = new Branch
+                {
+                    Id = Guid.NewGuid(),
+                    Code = "CN02",
+                    Name = "Chi nhánh 2 - Cầu Giấy (Hà Nội)",
+                    Address = "Số 88 Cầu Giấy, Phường Quan Hoa, Quận Cầu Giấy, TP. Hà Nội",
+                    Phone = "024 3766 5678",
+                    OpenHours = "08:00 - 22:30",
+                    TaxRatePercent = 8,
+                    ServiceChargePercent = 5,
+                    Currency = "VND",
+                    IsActive = true,
+                    CreatedAt = DateTime.UtcNow
+                };
+                db.Branches.Add(branchHN);
+            }
+            await db.SaveChangesAsync();
         }
 
         // 3. Seed Tài khoản nhân viên mẫu liên kết bảng Roles
@@ -192,7 +254,6 @@ public static class DependencyInjection
 
         var sampleUsers = new List<UserAccount>
         {
-            // Cấp 1: Giám đốc chuỗi
             new()
             {
                 PhoneOrEmail = "director@orderpum.vn",
@@ -206,7 +267,6 @@ public static class DependencyInjection
                 IsLocked = false,
                 CreatedAt = DateTime.UtcNow
             },
-            // Cấp 2: Chủ nhà hàng
             new()
             {
                 PhoneOrEmail = "owner@orderpum.vn",
@@ -220,7 +280,6 @@ public static class DependencyInjection
                 IsLocked = false,
                 CreatedAt = DateTime.UtcNow
             },
-            // Cấp 3: Quản lý chi nhánh Q1
             new()
             {
                 PhoneOrEmail = "manager.q1@orderpum.vn",
@@ -234,7 +293,6 @@ public static class DependencyInjection
                 IsLocked = false,
                 CreatedAt = DateTime.UtcNow
             },
-            // Cấp 3: Quản lý chi nhánh HN
             new()
             {
                 PhoneOrEmail = "manager.hn@orderpum.vn",
@@ -248,7 +306,6 @@ public static class DependencyInjection
                 IsLocked = false,
                 CreatedAt = DateTime.UtcNow
             },
-            // Cấp 4: Trưởng bộ phận Bếp
             new()
             {
                 PhoneOrEmail = "lead.kitchen@orderpum.vn",
@@ -262,7 +319,6 @@ public static class DependencyInjection
                 IsLocked = false,
                 CreatedAt = DateTime.UtcNow
             },
-            // Cấp 5: Nhân viên chính thức (Phục vụ)
             new()
             {
                 PhoneOrEmail = "staff.service1@orderpum.vn",
@@ -276,7 +332,6 @@ public static class DependencyInjection
                 IsLocked = false,
                 CreatedAt = DateTime.UtcNow
             },
-            // Cấp 5: Nhân viên chính thức (Thu ngân)
             new()
             {
                 PhoneOrEmail = "staff.cashier@orderpum.vn",
@@ -290,7 +345,6 @@ public static class DependencyInjection
                 IsLocked = false,
                 CreatedAt = DateTime.UtcNow
             },
-            // Cấp 6: Nhân viên thử việc
             new()
             {
                 PhoneOrEmail = "probation.waiter@orderpum.vn",

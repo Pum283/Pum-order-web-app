@@ -39,9 +39,9 @@ _Nền tảng bảo mật tối thiểu để mọi app/web chạy được._
 
 _Một chi nhánh đầu tiên + thuế/phí để lập hóa đơn đúng._
 
-- [ ] (8) CRUD chi nhánh nhà hàng
-- [ ] (99) Cấu hình thuế, phí dịch vụ, đơn vị tiền tệ
-- [ ] (105) Phân quyền truy cập dữ liệu nội bộ nghiêm ngặt (khép kín hệ thống)
+- [x] (8) CRUD chi nhánh nhà hàng
+- [x] (99) Cấu hình thuế, phí dịch vụ, đơn vị tiền tệ
+- [x] (105) Phân quyền truy cập dữ liệu nội bộ nghiêm ngặt (khép kín hệ thống)
 
 ### Bước 1.3 — Khu vực, bàn & mã QR
 

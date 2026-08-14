@@ -30,6 +30,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             .HasForeignKey(u => u.RoleId)
             .OnDelete(DeleteBehavior.SetNull);
 
+        modelBuilder.Entity<Branch>()
+            .HasMany(b => b.Users)
+            .WithOne()
+            .HasForeignKey(u => u.BranchId)
+            .OnDelete(DeleteBehavior.Restrict);
+
         base.OnModelCreating(modelBuilder);
     }
 }

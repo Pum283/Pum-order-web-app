@@ -117,7 +117,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       icon: Building2,
       active: pathname.startsWith("/admin/branches"),
       allowed: canManageUsers,
-      badge: "Giai đoạn 1",
+      badge: canManageUsers ? "STT 8, 99, 105" : "Cần cấp QL trở lên",
+      badgeColor: canManageUsers ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" : "bg-stone-800 text-stone-500",
     },
     {
       name: "Khu vực, Bàn & QR",
