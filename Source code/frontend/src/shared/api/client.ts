@@ -1,4 +1,4 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5006";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:2121";
 
 export type RoleDto = {
   id: string;
