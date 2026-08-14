@@ -5,12 +5,15 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
 using OrderPum.Application.Interfaces.Services.Auth;
 using OrderPum.Application.Interfaces.Services.Branch;
+using OrderPum.Application.Interfaces.Services.Floor;
 using OrderPum.Application.Interfaces.Services.Order;
 using OrderPum.Domain.Entities.Auth;
 using OrderPum.Domain.Entities.Branch;
+using OrderPum.Domain.Entities.Floor;
 using OrderPum.Domain.Enums.Auth;
 using OrderPum.Infrastructure.Implementations.Services.Auth;
 using OrderPum.Infrastructure.Implementations.Services.Branch;
+using OrderPum.Infrastructure.Implementations.Services.Floor;
 using OrderPum.Infrastructure.Implementations.Services.Order;
 using OrderPum.Infrastructure.Persistence;
 using OrderPum.Infrastructure.Security;
@@ -31,6 +34,7 @@ public static class DependencyInjection
         services.AddScoped<IJwtTokenService, JwtTokenService>();
         services.AddScoped<IRoleService, RoleService>();
         services.AddScoped<IBranchService, BranchService>();
+        services.AddScoped<IFloorService, FloorService>();
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IOrderService, OrderService>();
 
@@ -62,7 +66,7 @@ public static class DependencyInjection
         // Tự động tạo cơ sở dữ liệu và bảng nếu chưa tồn tại
         await db.Database.EnsureCreatedAsync();
 
-        // Tự động cập nhật cột mới nếu bảng Branches đã tồn tại từ trước
+        // Tự động cập nhật cột mới nếu bảng Branches, Areas, Tables đã tồn tại từ trước
         await db.Database.ExecuteSqlRawAsync(@"
             IF EXISTS (SELECT * FROM sys.tables WHERE name = 'Branches')
             BEGIN
@@ -78,6 +82,24 @@ public static class DependencyInjection
                     ALTER TABLE [Branches] ADD [ReceiptHeaderNote] NVARCHAR(500) NULL;
                 IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Branches') AND name = 'ReceiptFooterNote')
                     ALTER TABLE [Branches] ADD [ReceiptFooterNote] NVARCHAR(500) NULL;
+            END
+
+            IF EXISTS (SELECT * FROM sys.tables WHERE name = 'Areas')
+            BEGIN
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Areas') AND name = 'IsActive')
+                    ALTER TABLE [Areas] ADD [IsActive] BIT NOT NULL DEFAULT 1;
+            END
+
+            IF EXISTS (SELECT * FROM sys.tables WHERE name = 'Tables')
+            BEGIN
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Tables') AND name = 'Status')
+                    ALTER TABLE [Tables] ADD [Status] NVARCHAR(50) NOT NULL DEFAULT 'Available';
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Tables') AND name = 'PosX')
+                    ALTER TABLE [Tables] ADD [PosX] INT NOT NULL DEFAULT 0;
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Tables') AND name = 'PosY')
+                    ALTER TABLE [Tables] ADD [PosY] INT NOT NULL DEFAULT 0;
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Tables') AND name = 'IsActive')
+                    ALTER TABLE [Tables] ADD [IsActive] BIT NOT NULL DEFAULT 1;
             END
         ");
 
@@ -378,5 +400,63 @@ public static class DependencyInjection
         }
 
         await db.SaveChangesAsync();
+
+        // 4. Seed Khu vực (Areas) & Bàn ăn (DiningTables) cho Chi nhánh mẫu
+        var existingAreasQ1 = await db.Areas.Where(a => a.BranchId == branchQ1.Id && !a.IsDeleted).ToListAsync();
+        if (existingAreasQ1.Count == 0)
+        {
+            var area1 = new Area { Id = Guid.NewGuid(), BranchId = branchQ1.Id, Name = "Tầng 1 - Sảnh chính", SortOrder = 1, IsActive = true, CreatedAt = DateTime.UtcNow };
+            var area2 = new Area { Id = Guid.NewGuid(), BranchId = branchQ1.Id, Name = "Tầng 2 - Phòng máy lạnh", SortOrder = 2, IsActive = true, CreatedAt = DateTime.UtcNow };
+            var area3 = new Area { Id = Guid.NewGuid(), BranchId = branchQ1.Id, Name = "Sân Vườn ngoài trời", SortOrder = 3, IsActive = true, CreatedAt = DateTime.UtcNow };
+            var area4 = new Area { Id = Guid.NewGuid(), BranchId = branchQ1.Id, Name = "Phòng VIP", SortOrder = 4, IsActive = true, CreatedAt = DateTime.UtcNow };
+
+            db.Areas.AddRange(area1, area2, area3, area4);
+            await db.SaveChangesAsync();
+
+            // Seed Bàn ăn cho từng khu vực
+            var tablesQ1 = new List<DiningTable>
+            {
+                // Tầng 1
+                new() { Id = Guid.NewGuid(), BranchId = branchQ1.Id, AreaId = area1.Id, Code = "B01", Name = "Bàn 01", Capacity = 4, QrToken = Guid.NewGuid().ToString("N"), Status = "Available", PosX = 10, PosY = 10, IsActive = true, CreatedAt = DateTime.UtcNow },
+                new() { Id = Guid.NewGuid(), BranchId = branchQ1.Id, AreaId = area1.Id, Code = "B02", Name = "Bàn 02", Capacity = 4, QrToken = Guid.NewGuid().ToString("N"), Status = "Occupied", PosX = 30, PosY = 10, IsActive = true, CreatedAt = DateTime.UtcNow },
+                new() { Id = Guid.NewGuid(), BranchId = branchQ1.Id, AreaId = area1.Id, Code = "B03", Name = "Bàn 03", Capacity = 6, QrToken = Guid.NewGuid().ToString("N"), Status = "Available", PosX = 50, PosY = 10, IsActive = true, CreatedAt = DateTime.UtcNow },
+                new() { Id = Guid.NewGuid(), BranchId = branchQ1.Id, AreaId = area1.Id, Code = "B04", Name = "Bàn 04", Capacity = 2, QrToken = Guid.NewGuid().ToString("N"), Status = "NeedsCleaning", PosX = 70, PosY = 10, IsActive = true, CreatedAt = DateTime.UtcNow },
+                
+                // Tầng 2
+                new() { Id = Guid.NewGuid(), BranchId = branchQ1.Id, AreaId = area2.Id, Code = "B05", Name = "Bàn 05", Capacity = 4, QrToken = Guid.NewGuid().ToString("N"), Status = "Available", PosX = 10, PosY = 10, IsActive = true, CreatedAt = DateTime.UtcNow },
+                new() { Id = Guid.NewGuid(), BranchId = branchQ1.Id, AreaId = area2.Id, Code = "B06", Name = "Bàn 06", Capacity = 8, QrToken = Guid.NewGuid().ToString("N"), Status = "Reserved", PosX = 40, PosY = 10, IsActive = true, CreatedAt = DateTime.UtcNow },
+                new() { Id = Guid.NewGuid(), BranchId = branchQ1.Id, AreaId = area2.Id, Code = "B07", Name = "Bàn 07", Capacity = 4, QrToken = Guid.NewGuid().ToString("N"), Status = "Available", PosX = 70, PosY = 10, IsActive = true, CreatedAt = DateTime.UtcNow },
+
+                // Sân vườn
+                new() { Id = Guid.NewGuid(), BranchId = branchQ1.Id, AreaId = area3.Id, Code = "SV01", Name = "Bàn Sân Vườn 01", Capacity = 4, QrToken = Guid.NewGuid().ToString("N"), Status = "Available", PosX = 20, PosY = 20, IsActive = true, CreatedAt = DateTime.UtcNow },
+                new() { Id = Guid.NewGuid(), BranchId = branchQ1.Id, AreaId = area3.Id, Code = "SV02", Name = "Bàn Sân Vườn 02", Capacity = 6, QrToken = Guid.NewGuid().ToString("N"), Status = "Available", PosX = 60, PosY = 20, IsActive = true, CreatedAt = DateTime.UtcNow },
+
+                // VIP
+                new() { Id = Guid.NewGuid(), BranchId = branchQ1.Id, AreaId = area4.Id, Code = "VIP01", Name = "Phòng VIP Hoàng Gia", Capacity = 12, QrToken = Guid.NewGuid().ToString("N"), Status = "Available", PosX = 50, PosY = 50, IsActive = true, CreatedAt = DateTime.UtcNow }
+            };
+
+            db.Tables.AddRange(tablesQ1);
+            await db.SaveChangesAsync();
+        }
+
+        var existingAreasHN = await db.Areas.Where(a => a.BranchId == branchHN.Id && !a.IsDeleted).ToListAsync();
+        if (existingAreasHN.Count == 0)
+        {
+            var areaHN1 = new Area { Id = Guid.NewGuid(), BranchId = branchHN.Id, Name = "Tầng 1 - Sảnh trung tâm", SortOrder = 1, IsActive = true, CreatedAt = DateTime.UtcNow };
+            var areaHN2 = new Area { Id = Guid.NewGuid(), BranchId = branchHN.Id, Name = "Tầng 2 - Không gian mở", SortOrder = 2, IsActive = true, CreatedAt = DateTime.UtcNow };
+
+            db.Areas.AddRange(areaHN1, areaHN2);
+            await db.SaveChangesAsync();
+
+            var tablesHN = new List<DiningTable>
+            {
+                new() { Id = Guid.NewGuid(), BranchId = branchHN.Id, AreaId = areaHN1.Id, Code = "HN-01", Name = "Bàn HN 01", Capacity = 4, QrToken = Guid.NewGuid().ToString("N"), Status = "Available", PosX = 10, PosY = 10, IsActive = true, CreatedAt = DateTime.UtcNow },
+                new() { Id = Guid.NewGuid(), BranchId = branchHN.Id, AreaId = areaHN1.Id, Code = "HN-02", Name = "Bàn HN 02", Capacity = 6, QrToken = Guid.NewGuid().ToString("N"), Status = "Occupied", PosX = 40, PosY = 10, IsActive = true, CreatedAt = DateTime.UtcNow },
+                new() { Id = Guid.NewGuid(), BranchId = branchHN.Id, AreaId = areaHN2.Id, Code = "HN-03", Name = "Bàn HN 03", Capacity = 4, QrToken = Guid.NewGuid().ToString("N"), Status = "Available", PosX = 20, PosY = 20, IsActive = true, CreatedAt = DateTime.UtcNow }
+            };
+
+            db.Tables.AddRange(tablesHN);
+            await db.SaveChangesAsync();
+        }
     }
 }

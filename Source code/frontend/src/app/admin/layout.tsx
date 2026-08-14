@@ -126,7 +126,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       icon: QrCode,
       active: pathname.startsWith("/admin/tables"),
       allowed: true,
-      badge: "Giai đoạn 1",
+      badge: "STT 13, 14, 15",
+      badgeColor: "bg-amber-500/10 text-amber-400 border-amber-500/20",
     },
     {
       name: "Thực đơn & Giá",

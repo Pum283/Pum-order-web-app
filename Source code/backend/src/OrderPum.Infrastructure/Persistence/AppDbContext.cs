@@ -36,6 +36,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             .HasForeignKey(u => u.BranchId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        modelBuilder.Entity<Area>()
+            .HasMany(a => a.Tables)
+            .WithOne(t => t.Area)
+            .HasForeignKey(t => t.AreaId)
+            .OnDelete(DeleteBehavior.Restrict);
+
         base.OnModelCreating(modelBuilder);
     }
 }

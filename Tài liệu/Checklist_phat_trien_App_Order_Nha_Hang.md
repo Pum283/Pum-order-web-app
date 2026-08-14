@@ -47,9 +47,9 @@ _Một chi nhánh đầu tiên + thuế/phí để lập hóa đơn đúng._
 
 _Master data mặt bằng — điều kiện bắt buộc để order theo bàn._
 
-- [ ] (13) CRUD khu vực/tầng
-- [ ] (14) CRUD bàn theo khu vực/tầng
-- [ ] (15) Gen mã QR cho từng bàn (xuất PDF/PNG)
+- [x] (13) CRUD khu vực/tầng
+- [x] (14) CRUD bàn theo khu vực/tầng
+- [x] (15) Gen mã QR cho từng bàn (xuất PDF/PNG)
 
 ### Bước 1.4 — Sơ đồ bàn & chuyển bàn
 

@@ -156,6 +156,68 @@ export type UpdateFinancialConfigRequest = {
   receiptFooterNote?: string;
 };
 
+export type AreaDto = {
+  id: string;
+  branchId: string;
+  branchName: string;
+  name: string;
+  sortOrder: number;
+  isActive: boolean;
+  tableCount: number;
+  createdAt: string;
+};
+
+export type CreateAreaRequest = {
+  branchId: string;
+  name: string;
+  sortOrder?: number;
+};
+
+export type UpdateAreaRequest = {
+  name: string;
+  sortOrder?: number;
+  isActive: boolean;
+};
+
+export type DiningTableDto = {
+  id: string;
+  branchId: string;
+  branchName: string;
+  areaId: string;
+  areaName: string;
+  code: string;
+  name?: string;
+  capacity: number;
+  qrToken: string;
+  qrUrl: string;
+  status: "Available" | "Occupied" | "Reserved" | "NeedsCleaning";
+  posX: number;
+  posY: number;
+  isActive: boolean;
+  createdAt: string;
+};
+
+export type CreateTableRequest = {
+  branchId: string;
+  areaId: string;
+  code: string;
+  name?: string;
+  capacity: number;
+  posX?: number;
+  posY?: number;
+};
+
+export type UpdateTableRequest = {
+  areaId: string;
+  code: string;
+  name?: string;
+  capacity: number;
+  status?: string;
+  posX?: number;
+  posY?: number;
+  isActive: boolean;
+};
+
 function getAuthToken(): string | null {
   if (typeof window === "undefined") return null;
   return localStorage.getItem("orderpum_token");
@@ -312,6 +374,55 @@ export const api = {
 
   deleteBranch: (id: string) =>
     request<{ message: string }>(`/api/branches/${id}`, {
+      method: "DELETE",
+    }),
+
+  // Area APIs (STT 13)
+  getAreas: (branchId: string) => request<AreaDto[]>(`/api/areas?branchId=${branchId}`),
+  getAreaById: (id: string) => request<AreaDto>(`/api/areas/${id}`),
+  createArea: (data: CreateAreaRequest) =>
+    request<AreaDto>("/api/areas", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  updateArea: (id: string, data: UpdateAreaRequest) =>
+    request<AreaDto>(`/api/areas/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+  deleteArea: (id: string) =>
+    request<{ message: string }>(`/api/areas/${id}`, {
+      method: "DELETE",
+    }),
+
+  // Table & QR APIs (STT 14, 15)
+  getTables: (branchId: string, areaId?: string) => {
+    const url = areaId ? `/api/tables?branchId=${branchId}&areaId=${areaId}` : `/api/tables?branchId=${branchId}`;
+    return request<DiningTableDto[]>(url);
+  },
+  getTableById: (id: string) => request<DiningTableDto>(`/api/tables/${id}`),
+  getTableByQrToken: (qrToken: string) => request<DiningTableDto>(`/api/tables/qr/${qrToken}`),
+  createTable: (data: CreateTableRequest) =>
+    request<DiningTableDto>("/api/tables", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  updateTable: (id: string, data: UpdateTableRequest) =>
+    request<DiningTableDto>(`/api/tables/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+  updateTableStatus: (id: string, status: string) =>
+    request<DiningTableDto>(`/api/tables/${id}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    }),
+  regenerateTableQr: (id: string) =>
+    request<DiningTableDto>(`/api/tables/${id}/regenerate-qr`, {
+      method: "POST",
+    }),
+  deleteTable: (id: string) =>
+    request<{ message: string }>(`/api/tables/${id}`, {
       method: "DELETE",
     }),
 
