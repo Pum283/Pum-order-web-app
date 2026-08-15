@@ -236,31 +236,34 @@ public class MenuService(AppDbContext dbContext) : IMenuService
         var branch = await dbContext.Branches.FirstOrDefaultAsync(b => b.Id == branchId);
         var branchName = branch?.Name ?? string.Empty;
 
-        var items = await query
-            .OrderBy(i => i.Category != null ? i.Category.SortOrder : 99)
-            .ThenBy(i => i.Code)
-            .Select(i => new MenuItemDto
-            {
-                Id = i.Id,
-                BranchId = i.BranchId,
-                BranchName = branchName,
-                CategoryId = i.CategoryId,
-                CategoryName = i.Category != null ? i.Category.Name : string.Empty,
-                Code = i.Code,
-                Name = i.Name,
-                Description = i.Description,
-                ImageUrl = i.ImageUrl,
-                Price = i.Price,
-                Unit = i.Unit,
-                KitchenStation = i.KitchenStation,
-                PreparationMinutes = i.PreparationMinutes,
-                IsAvailable = i.IsAvailable,
-                Is86ed = i.Is86ed,
-                IsActive = i.IsActive,
-                OptionCount = i.Options.Count(o => !o.IsDeleted),
-                CreatedAt = i.CreatedAt
-            })
+        var rawList = await query
+            .OrderBy(i => i.Code)
             .ToListAsync();
+
+        var items = rawList.Select(i => new MenuItemDto
+        {
+            Id = i.Id,
+            BranchId = i.BranchId,
+            BranchName = branchName,
+            CategoryId = i.CategoryId,
+            CategoryName = i.Category?.Name ?? string.Empty,
+            Code = i.Code,
+            Name = i.Name,
+            Description = i.Description,
+            ImageUrl = i.ImageUrl,
+            Price = i.Price,
+            Unit = i.Unit,
+            KitchenStation = i.KitchenStation,
+            PreparationMinutes = i.PreparationMinutes,
+            IsAvailable = i.IsAvailable,
+            Is86ed = i.Is86ed,
+            IsActive = i.IsActive,
+            OptionCount = i.Options?.Count(o => !o.IsDeleted) ?? 0,
+            CreatedAt = i.CreatedAt
+        })
+        .OrderBy(i => i.CategoryName)
+        .ThenBy(i => i.Code)
+        .ToList();
 
         return items;
     }

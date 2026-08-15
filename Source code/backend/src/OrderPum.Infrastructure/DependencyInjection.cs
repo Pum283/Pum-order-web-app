@@ -130,6 +130,37 @@ public static class DependencyInjection
                     ALTER TABLE [MenuItems] ADD [IsActive] BIT NOT NULL DEFAULT 1;
             END
 
+            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'MenuItemOptions')
+            BEGIN
+                CREATE TABLE [MenuItemOptions] (
+                    [Id] UNIQUEIDENTIFIER NOT NULL PRIMARY KEY,
+                    [MenuItemId] UNIQUEIDENTIFIER NOT NULL,
+                    [Name] NVARCHAR(150) NOT NULL,
+                    [OptionType] NVARCHAR(50) NOT NULL DEFAULT 'Single',
+                    [IsRequired] BIT NOT NULL DEFAULT 0,
+                    [SortOrder] INT NOT NULL DEFAULT 1,
+                    [CreatedAt] DATETIME2 NOT NULL,
+                    [UpdatedAt] DATETIME2 NULL,
+                    [IsDeleted] BIT NOT NULL DEFAULT 0
+                );
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'MenuItemOptionValues')
+            BEGIN
+                CREATE TABLE [MenuItemOptionValues] (
+                    [Id] UNIQUEIDENTIFIER NOT NULL PRIMARY KEY,
+                    [OptionId] UNIQUEIDENTIFIER NOT NULL,
+                    [Name] NVARCHAR(150) NOT NULL,
+                    [ExtraPrice] DECIMAL(18,2) NOT NULL DEFAULT 0,
+                    [IsDefault] BIT NOT NULL DEFAULT 0,
+                    [IsAvailable] BIT NOT NULL DEFAULT 1,
+                    [SortOrder] INT NOT NULL DEFAULT 1,
+                    [CreatedAt] DATETIME2 NOT NULL,
+                    [UpdatedAt] DATETIME2 NULL,
+                    [IsDeleted] BIT NOT NULL DEFAULT 0
+                );
+            END
+
             IF EXISTS (SELECT * FROM sys.tables WHERE name = 'TableSessions')
             BEGIN
                 IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('TableSessions') AND name = 'SessionCode')

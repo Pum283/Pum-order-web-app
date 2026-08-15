@@ -480,11 +480,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!res.ok) {
     let errorMsg = `HTTP ${res.status}: ${res.statusText}`;
     try {
-      const data = await res.json();
-      if (data?.message) errorMsg = data.message;
-    } catch {
       const text = await res.text();
-      if (text) errorMsg = text;
+      if (text) {
+        try {
+          const data = JSON.parse(text);
+          if (data?.message) errorMsg = data.message;
+          else if (typeof data === "string") errorMsg = data;
+        } catch {
+          errorMsg = text;
+        }
+      }
+    } catch {
+      // fallback to statusText
     }
     throw new Error(errorMsg);
   }

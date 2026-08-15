@@ -8,7 +8,8 @@ using OrderPum.Domain.Enums.Auth;
 namespace OrderPum.Api.Controllers.Menu;
 
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/menuitems")]
+[Route("api/menu/items")]
 [Authorize]
 public class MenuItemsController(IMenuService menuService) : ControllerBase
 {
