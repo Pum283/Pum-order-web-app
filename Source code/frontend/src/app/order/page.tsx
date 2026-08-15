@@ -28,13 +28,17 @@ import {
   History,
   Sparkles,
   ChevronRight,
-  Info,
   RefreshCw,
   Phone,
   MapPin,
   Check,
   Receipt,
-  Eye,
+  Bell,
+  CreditCard,
+  QrCode,
+  DollarSign,
+  Coffee,
+  HelpCircle,
 } from "lucide-react";
 
 interface QrCartItem {
@@ -78,8 +82,19 @@ function QrOrderContent() {
   const [customizingNote, setCustomizingNote] = useState<string>("");
   const [customizingQuantity, setCustomizingQuantity] = useState<number>(1);
 
-  // Success Notification state
-  const [orderSuccessMsg, setOrderSuccessMsg] = useState<string | null>(null);
+  // Interaction Modals: Call Staff (STT 27) & Request Bill (STT 28)
+  const [isCallStaffOpen, setIsCallStaffOpen] = useState(false);
+  const [callReason, setCallReason] = useState<string>("Cần nhân viên hỗ trợ");
+  const [customCallReason, setCustomCallReason] = useState<string>("");
+  const [callingStaff, setCallingStaff] = useState(false);
+
+  const [isRequestBillOpen, setIsRequestBillOpen] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState<string>("VietQr");
+  const [billNote, setBillNote] = useState<string>("");
+  const [requestingBill, setRequestingBill] = useState(false);
+
+  // Notification Toast state
+  const [toastMsg, setToastMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   // Load Table & Menu Info by QR Token
   useEffect(() => {
@@ -303,13 +318,54 @@ function QrOrderContent() {
       // Refresh Session to display new ticket in history
       await refreshSession();
       setActiveTab("session");
-      setOrderSuccessMsg(
-        `Đã gửi yêu cầu đặt ${lines.length} món thành công! Nhân viên sẽ xác nhận và phục vụ bạn trong giây lát.`
-      );
+      setToastMsg({
+        type: "success",
+        text: `Đã gửi yêu cầu đặt ${lines.length} món! Nhân viên sẽ xác nhận và chuyển vào bếp chế biến.`,
+      });
     } catch (err: any) {
-      alert(err.message || "Lỗi khi gửi order.");
+      setToastMsg({ type: "error", text: err.message || "Lỗi khi gửi order." });
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  // STT 27: Handle Call Staff
+  const handleCallStaff = async () => {
+    if (!token) return;
+    const finalReason = customCallReason.trim() || callReason;
+    try {
+      setCallingStaff(true);
+      await api.callStaff(token, finalReason);
+      setIsCallStaffOpen(false);
+      setCustomCallReason("");
+      setToastMsg({
+        type: "success",
+        text: "Đã gửi tín hiệu gọi nhân viên! Nhân viên phụ trách sẽ đến bàn ngay.",
+      });
+    } catch (err: any) {
+      setToastMsg({ type: "error", text: err.message || "Lỗi khi gọi nhân viên." });
+    } finally {
+      setCallingStaff(false);
+    }
+  };
+
+  // STT 28: Handle Request Bill
+  const handleRequestBill = async () => {
+    if (!token) return;
+    try {
+      setRequestingBill(true);
+      await api.requestBill(token, paymentMethod, billNote);
+      setIsRequestBillOpen(false);
+      setBillNote("");
+      await refreshSession();
+      setToastMsg({
+        type: "success",
+        text: "Đã gửi yêu cầu thanh toán tới thu ngân! Nhân viên sẽ mang hóa đơn tới bàn.",
+      });
+    } catch (err: any) {
+      setToastMsg({ type: "error", text: err.message || "Lỗi khi yêu cầu thanh toán." });
+    } finally {
+      setRequestingBill(false);
     }
   };
 
@@ -356,6 +412,12 @@ function QrOrderContent() {
             <Check className="w-3 h-3" /> Đã phục vụ
           </span>
         );
+      case "Cancelled":
+        return (
+          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/30 flex items-center gap-1">
+            <X className="w-3 h-3" /> Đã từ chối
+          </span>
+        );
       default:
         return (
           <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-stone-800 text-stone-400">
@@ -398,10 +460,34 @@ function QrOrderContent() {
 
   return (
     <div className="min-h-screen bg-stone-950 text-stone-100 flex flex-col pb-24 selection:bg-amber-500 selection:text-stone-950">
+      {/* Toast Notification */}
+      {toastMsg && (
+        <div
+          className={`fixed top-4 inset-x-4 max-w-md mx-auto z-50 flex items-center gap-3 px-4 py-3 rounded-2xl shadow-2xl border backdrop-blur-md transition-all duration-300 ${
+            toastMsg.type === "success"
+              ? "bg-emerald-950/95 text-emerald-200 border-emerald-500/40"
+              : "bg-rose-950/95 text-rose-200 border-rose-500/40"
+          }`}
+        >
+          {toastMsg.type === "success" ? (
+            <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+          ) : (
+            <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />
+          )}
+          <span className="text-xs font-semibold flex-1 leading-snug">{toastMsg.text}</span>
+          <button
+            onClick={() => setToastMsg(null)}
+            className="text-stone-400 hover:text-white text-xs p-1"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* ============================================================== */}
       {/* RESTAURANT & TABLE HERO HEADER                                 */}
       {/* ============================================================== */}
-      <header className="relative bg-gradient-to-b from-stone-900 to-stone-950 border-b border-stone-800/80 px-4 pt-5 pb-4 shrink-0 shadow-lg">
+      <header className="relative bg-gradient-to-b from-stone-900 to-stone-950 border-b border-stone-800/80 px-4 pt-4 pb-3 shrink-0 shadow-lg">
         <div className="max-w-xl mx-auto flex items-center justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
@@ -410,65 +496,59 @@ function QrOrderContent() {
                 {tableInfo.branchName}
               </span>
             </div>
-            <h1 className="text-xl font-black tracking-tight text-white mt-0.5 flex items-center gap-2">
+            <h1 className="text-lg font-black tracking-tight text-white mt-0.5 flex items-center gap-2">
               <span>{tableInfo.tableName || tableInfo.tableCode}</span>
-              <span className="text-xs px-2 py-0.5 rounded-md bg-stone-800 text-stone-300 font-semibold">
+              <span className="text-[11px] px-2 py-0.5 rounded-md bg-stone-800 text-stone-300 font-semibold">
                 {tableInfo.areaName}
               </span>
             </h1>
           </div>
 
-          {/* Tab Switcher: Menu vs Session */}
-          <div className="flex items-center bg-stone-900 border border-stone-800 rounded-xl p-1 shadow-inner">
+          {/* Action Tools: Call Staff (STT 27) & View Tab */}
+          <div className="flex items-center gap-2">
             <button
-              onClick={() => setActiveTab("menu")}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-                activeTab === "menu"
-                  ? "bg-amber-500 text-stone-950 shadow-md shadow-amber-500/20"
-                  : "text-stone-400 hover:text-stone-200"
-              }`}
+              onClick={() => setIsCallStaffOpen(true)}
+              className="p-2 rounded-xl bg-stone-900 hover:bg-amber-500/20 text-stone-300 hover:text-amber-400 border border-stone-800 transition-all flex items-center gap-1.5 text-xs font-bold shadow-sm"
+              title="Gọi nhân viên phục vụ (STT 27)"
             >
-              <UtensilsCrossed className="w-3.5 h-3.5" />
-              <span>Thực đơn</span>
+              <Bell className="w-4 h-4 text-amber-400" />
+              <span className="hidden sm:inline">Gọi NV</span>
             </button>
-            <button
-              onClick={() => {
-                setActiveTab("session");
-                refreshSession();
-              }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 relative ${
-                activeTab === "session"
-                  ? "bg-amber-500 text-stone-950 shadow-md shadow-amber-500/20"
-                  : "text-stone-400 hover:text-stone-200"
-              }`}
-            >
-              <Receipt className="w-3.5 h-3.5" />
-              <span>Đơn bàn</span>
-              {sessionData && sessionData.totalItemsCount > 0 && (
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping absolute -top-0.5 -right-0.5" />
-              )}
-            </button>
+
+            {/* Tab Switcher: Menu vs Session */}
+            <div className="flex items-center bg-stone-900 border border-stone-800 rounded-xl p-1 shadow-inner">
+              <button
+                onClick={() => setActiveTab("menu")}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                  activeTab === "menu"
+                    ? "bg-amber-500 text-stone-950 shadow-md shadow-amber-500/20"
+                    : "text-stone-400 hover:text-stone-200"
+                }`}
+              >
+                <UtensilsCrossed className="w-3.5 h-3.5" />
+                <span>Menu</span>
+              </button>
+              <button
+                onClick={() => {
+                  setActiveTab("session");
+                  refreshSession();
+                }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 relative ${
+                  activeTab === "session"
+                    ? "bg-amber-500 text-stone-950 shadow-md shadow-amber-500/20"
+                    : "text-stone-400 hover:text-stone-200"
+                }`}
+              >
+                <Receipt className="w-3.5 h-3.5" />
+                <span>Đơn bàn</span>
+                {sessionData && sessionData.totalItemsCount > 0 && (
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping absolute -top-0.5 -right-0.5" />
+                )}
+              </button>
+            </div>
           </div>
         </div>
       </header>
-
-      {/* Success Notification Banner */}
-      {orderSuccessMsg && (
-        <div className="max-w-xl mx-auto w-full px-4 mt-3">
-          <div className="p-3.5 rounded-2xl bg-emerald-950/80 border border-emerald-500/40 text-emerald-200 flex items-start gap-3 shadow-lg">
-            <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
-            <div className="flex-1 text-xs">
-              <p className="font-bold">{orderSuccessMsg}</p>
-            </div>
-            <button
-              onClick={() => setOrderSuccessMsg(null)}
-              className="text-stone-400 hover:text-white text-xs"
-            >
-              ✕
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* ============================================================== */}
       {/* TAB 1: MENU VIEW (STT 22, 23)                                  */}
@@ -598,14 +678,14 @@ function QrOrderContent() {
       )}
 
       {/* ============================================================== */}
-      {/* TAB 2: SESSION STATUS & TIMELINE (STT 25)                      */}
+      {/* TAB 2: SESSION STATUS, BILL PREVIEW & TIMELINE (STT 25, 28, 58) */}
       {/* ============================================================== */}
       {activeTab === "session" && (
         <main className="max-w-xl mx-auto w-full px-4 pt-4 flex-1 flex flex-col gap-4">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-bold text-stone-200 flex items-center gap-2">
               <History className="w-4 h-4 text-amber-400" />
-              <span>Đơn món đã gọi tại bàn</span>
+              <span>Lịch sử gọi món tại bàn</span>
             </h2>
             <button
               onClick={refreshSession}
@@ -681,22 +761,41 @@ function QrOrderContent() {
                 </div>
               ))}
 
-              {/* Total Session Bill Card */}
-              <div className="rounded-2xl bg-stone-900 border border-stone-800 p-4 flex items-center justify-between shadow-xl">
-                <div>
-                  <span className="text-xs text-stone-400 block">
+              {/* Total Session Bill Card (STT 58) */}
+              <div className="rounded-2xl bg-stone-900 border border-stone-800 p-4 space-y-3 shadow-xl">
+                <div className="flex items-center justify-between pb-2 border-b border-stone-800">
+                  <span className="text-xs font-bold text-stone-300">Tạm tính hóa đơn bàn:</span>
+                  <span className="text-xs font-mono text-stone-400">
+                    {sessionData.sessionCode} • {sessionData.status === "Paying" ? "Đang chờ thanh toán" : "Đang phục vụ"}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-stone-400">
                     Tổng cộng ({sessionData.totalItemsCount} món):
                   </span>
                   <span className="text-xl font-black text-emerald-400 font-mono">
                     {sessionData.totalAmount.toLocaleString("vi-VN")}đ
                   </span>
                 </div>
-                <button
-                  onClick={() => setActiveTab("menu")}
-                  className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-stone-950 font-bold text-xs shadow-lg shadow-amber-500/20"
-                >
-                  + Gọi thêm món
-                </button>
+
+                {/* Bottom Actions: Add More & Request Bill (STT 28) */}
+                <div className="grid grid-cols-2 gap-2 pt-2 border-t border-stone-800">
+                  <button
+                    onClick={() => setActiveTab("menu")}
+                    className="py-2.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-200 font-bold text-xs transition"
+                  >
+                    + Gọi thêm món
+                  </button>
+
+                  <button
+                    onClick={() => setIsRequestBillOpen(true)}
+                    className="py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white font-black text-xs shadow-lg shadow-emerald-600/20 transition flex items-center justify-center gap-1.5"
+                  >
+                    <CreditCard className="w-4 h-4" />
+                    <span>Gọi thanh toán</span>
+                  </button>
+                </div>
               </div>
             </div>
           ) : (
@@ -875,6 +974,154 @@ function QrOrderContent() {
                     <span>XÁC NHẬN ĐẶT MÓN NGAY</span>
                   </>
                 )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================== */}
+      {/* MODAL: CALL STAFF (STT 27)                                     */}
+      {/* ============================================================== */}
+      {isCallStaffOpen && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-stone-900 border border-stone-800 rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl p-5 space-y-4 animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between pb-2 border-b border-stone-800">
+              <div className="flex items-center gap-2">
+                <Bell className="w-5 h-5 text-amber-400 animate-bounce" />
+                <h3 className="text-sm font-bold text-white">Gọi nhân viên phục vụ</h3>
+              </div>
+              <button onClick={() => setIsCallStaffOpen(false)} className="text-stone-400 hover:text-white">
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-stone-400">Chọn yêu cầu bạn cần hỗ trợ:</p>
+
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                "Lấy thêm đá",
+                "Thêm bát đĩa",
+                "Thêm nước lọc",
+                "Khăn lạnh",
+                "Dọn bớt đĩa",
+                "Gặp quản lý",
+              ].map((reason) => (
+                <button
+                  key={reason}
+                  type="button"
+                  onClick={() => setCallReason(reason)}
+                  className={`p-2.5 rounded-xl text-xs font-semibold border text-center transition-all ${
+                    callReason === reason
+                      ? "bg-amber-500 text-stone-950 border-amber-500 font-bold"
+                      : "bg-stone-950 border-stone-800 text-stone-300 hover:border-stone-700"
+                  }`}
+                >
+                  {reason}
+                </button>
+              ))}
+            </div>
+
+            <div>
+              <label className="text-[11px] text-stone-400 block mb-1">Hoặc nhập yêu cầu khác:</label>
+              <input
+                type="text"
+                placeholder="VD: Cần đổi bàn, cần tư vấn món..."
+                value={customCallReason}
+                onChange={(e) => setCustomCallReason(e.target.value)}
+                className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3 py-2 text-xs text-stone-200 placeholder-stone-500 focus:outline-none focus:border-amber-500"
+              />
+            </div>
+
+            <div className="flex items-center gap-2 pt-2">
+              <button
+                onClick={() => setIsCallStaffOpen(false)}
+                className="flex-1 py-2.5 rounded-xl bg-stone-800 text-stone-300 text-xs font-bold"
+              >
+                Hủy
+              </button>
+              <button
+                onClick={handleCallStaff}
+                disabled={callingStaff}
+                className="flex-1 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-stone-950 font-black text-xs shadow-md shadow-amber-500/20 transition flex items-center justify-center gap-1.5"
+              >
+                {callingStaff ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Bell className="w-3.5 h-3.5" />}
+                <span>Gửi tín hiệu</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================== */}
+      {/* MODAL: REQUEST BILL (STT 28)                                   */}
+      {/* ============================================================== */}
+      {isRequestBillOpen && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-stone-900 border border-stone-800 rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl p-5 space-y-4 animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between pb-2 border-b border-stone-800">
+              <div className="flex items-center gap-2">
+                <CreditCard className="w-5 h-5 text-emerald-400" />
+                <h3 className="text-sm font-bold text-white">Yêu cầu thanh toán</h3>
+              </div>
+              <button onClick={() => setIsRequestBillOpen(false)} className="text-stone-400 hover:text-white">
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-stone-400">Chọn hình thức bạn muốn thanh toán:</p>
+
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { id: "VietQr", label: "Chuyển khoản VietQR", icon: QrCode },
+                { id: "Cash", label: "Tiền mặt", icon: DollarSign },
+                { id: "Card", label: "Quẹt thẻ POS", icon: CreditCard },
+              ].map((m) => {
+                const IconComponent = m.icon;
+                const isSelected = paymentMethod === m.id;
+                return (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => setPaymentMethod(m.id)}
+                    className={`p-2.5 rounded-xl text-xs font-semibold border flex flex-col items-center gap-1.5 transition-all text-center ${
+                      isSelected
+                        ? "bg-emerald-500/20 text-emerald-300 border-emerald-500 font-bold"
+                        : "bg-stone-950 border-stone-800 text-stone-400 hover:text-stone-200"
+                    }`}
+                  >
+                    <IconComponent className="w-5 h-5" />
+                    <span className="text-[10px]">{m.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div>
+              <label className="text-[11px] text-stone-400 block mb-1">Ghi chú cho thu ngân:</label>
+              <input
+                type="text"
+                placeholder="VD: Xuất hóa đơn VAT, tách bill..."
+                value={billNote}
+                onChange={(e) => setBillNote(e.target.value)}
+                className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3 py-2 text-xs text-stone-200 placeholder-stone-500 focus:outline-none focus:border-amber-500"
+              />
+            </div>
+
+            <div className="flex items-center gap-2 pt-2">
+              <button
+                onClick={() => setIsRequestBillOpen(false)}
+                className="flex-1 py-2.5 rounded-xl bg-stone-800 text-stone-300 text-xs font-bold"
+              >
+                Hủy
+              </button>
+              <button
+                onClick={handleRequestBill}
+                disabled={requestingBill}
+                className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white font-black text-xs shadow-lg shadow-emerald-600/20 transition flex items-center justify-center gap-1.5"
+              >
+                {requestingBill ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                <span>Gửi yêu cầu</span>
               </button>
             </div>
           </div>

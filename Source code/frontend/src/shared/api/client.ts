@@ -446,6 +446,19 @@ export type QrTableInfoDto = {
   menuItems: MenuItemDetailDto[];
 };
 
+export type TableNotificationDto = {
+  id: string;
+  branchId: string;
+  tableId: string;
+  tableCode: string;
+  tableName: string;
+  areaName: string;
+  type: "CallStaff" | "RequestBill" | "NewQrOrder" | "ItemReady";
+  message: string;
+  isHandled: boolean;
+  createdAt: string;
+};
+
 function getAuthToken(): string | null {
   if (typeof window === "undefined") return null;
   return localStorage.getItem("orderpum_token");
@@ -760,10 +773,37 @@ export const api = {
       method: "POST",
     }),
 
-  // QR Guest Methods (STT 22, 23, 25)
+  rejectQrTicket: (ticketId: string, reason: string) =>
+    request<void>(`/api/orders/qr/${ticketId}/reject`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    }),
+
+  // QR Guest Methods (STT 22, 23, 25, 27, 28)
   getQrTableInfo: (token: string) =>
     request<QrTableInfoDto>(`/api/orders/qr/info?token=${encodeURIComponent(token)}`),
 
   getQrSessionStatus: (token: string) =>
     request<TableSessionDetailDto | null>(`/api/orders/qr/session?token=${encodeURIComponent(token)}`),
+
+  callStaff: (tableQrToken: string, reason?: string) =>
+    request<TableNotificationDto>("/api/orders/qr/call-staff", {
+      method: "POST",
+      body: JSON.stringify({ tableQrToken, reason }),
+    }),
+
+  requestBill: (tableQrToken: string, paymentMethod = "Cash", note?: string) =>
+    request<TableNotificationDto>("/api/orders/qr/request-bill", {
+      method: "POST",
+      body: JSON.stringify({ tableQrToken, paymentMethod, note }),
+    }),
+
+  // Realtime Notifications (STT 95)
+  getNotifications: (branchId: string) =>
+    request<TableNotificationDto[]>(`/api/orders/notifications?branchId=${branchId}`),
+
+  dismissNotification: (notificationId: string) =>
+    request<void>(`/api/orders/notifications/${notificationId}/dismiss`, {
+      method: "POST",
+    }),
 };

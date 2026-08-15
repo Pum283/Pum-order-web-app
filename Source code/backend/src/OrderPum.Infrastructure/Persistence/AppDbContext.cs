@@ -21,6 +21,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<TableSession> TableSessions => Set<TableSession>();
     public DbSet<OrderTicket> OrderTickets => Set<OrderTicket>();
     public DbSet<OrderLine> OrderLines => Set<OrderLine>();
+    public DbSet<TableNotification> TableNotifications => Set<TableNotification>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

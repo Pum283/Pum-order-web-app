@@ -49,7 +49,7 @@ public class OrderService(AppDbContext db) : IOrderService
     public async Task<TableSessionDetailDto?> GetActiveSessionByTableAsync(Guid tableId, CancellationToken ct = default)
     {
         var session = await db.TableSessions
-            .FirstOrDefaultAsync(x => x.TableId == tableId && x.Status == TableSessionStatus.Open && !x.IsDeleted, ct);
+            .FirstOrDefaultAsync(x => x.TableId == tableId && (x.Status == TableSessionStatus.Open || x.Status == TableSessionStatus.Paying) && !x.IsDeleted, ct);
 
         if (session is null) return null;
 
@@ -132,8 +132,8 @@ public class OrderService(AppDbContext db) : IOrderService
         var session = await db.TableSessions.FirstOrDefaultAsync(x => x.Id == request.SessionId && !x.IsDeleted, ct)
             ?? throw new InvalidOperationException("Không tìm thấy phiên bàn.");
 
-        if (session.Status != TableSessionStatus.Open)
-            throw new InvalidOperationException("Phiên bàn đã kết thúc hoặc đang thanh toán.");
+        if (session.Status == TableSessionStatus.Closed)
+            throw new InvalidOperationException("Phiên bàn đã kết thúc.");
 
         var ticket = await CreateTicketAsync(session, OrderSource.StaffAssisted, staffUserId, request.Note, request.Lines, sendStraightToKitchen: true, ct);
 
@@ -155,7 +155,7 @@ public class OrderService(AppDbContext db) : IOrderService
             ?? throw new InvalidOperationException("Mã QR bàn không hợp lệ hoặc đã bị vô hiệu hóa.");
 
         var session = await db.TableSessions
-            .FirstOrDefaultAsync(x => x.TableId == table.Id && x.Status == TableSessionStatus.Open && !x.IsDeleted, ct);
+            .FirstOrDefaultAsync(x => x.TableId == table.Id && (x.Status == TableSessionStatus.Open || x.Status == TableSessionStatus.Paying) && !x.IsDeleted, ct);
 
         if (session is null)
         {
@@ -198,6 +198,25 @@ public class OrderService(AppDbContext db) : IOrderService
         foreach (var line in lines.Where(x => x.Status == OrderItemStatus.PendingConfirm))
         {
             line.Status = OrderItemStatus.SentToKitchen;
+            line.UpdatedAt = DateTime.UtcNow;
+        }
+
+        await db.SaveChangesAsync(ct);
+    }
+
+    public async Task RejectQrTicketAsync(Guid ticketId, string reason, Guid staffUserId, CancellationToken ct = default)
+    {
+        var ticket = await db.OrderTickets.FirstOrDefaultAsync(x => x.Id == ticketId && !x.IsDeleted, ct)
+            ?? throw new InvalidOperationException("Không tìm thấy đợt gọi món.");
+
+        ticket.Note = string.IsNullOrWhiteSpace(ticket.Note)
+            ? $"[Từ chối bởi NV: {reason}]"
+            : $"{ticket.Note} | [Từ chối: {reason}]";
+
+        var lines = await db.OrderLines.Where(x => x.TicketId == ticketId && !x.IsDeleted).ToListAsync(ct);
+        foreach (var line in lines.Where(x => x.Status == OrderItemStatus.PendingConfirm))
+        {
+            line.Status = OrderItemStatus.Cancelled;
             line.UpdatedAt = DateTime.UtcNow;
         }
 
@@ -331,6 +350,141 @@ public class OrderService(AppDbContext db) : IOrderService
         if (table is null) return null;
 
         return await GetActiveSessionByTableAsync(table.Id, ct);
+    }
+
+    public async Task<TableNotificationDto> CallStaffAsync(CallStaffRequest request, CancellationToken ct = default)
+    {
+        var table = await db.Tables.FirstOrDefaultAsync(x => x.QrToken == request.TableQrToken && !x.IsDeleted, ct)
+            ?? throw new InvalidOperationException("Mã QR không hợp lệ.");
+
+        var area = await db.Areas.FirstOrDefaultAsync(a => a.Id == table.AreaId, ct);
+        var session = await db.TableSessions.FirstOrDefaultAsync(s => s.TableId == table.Id && s.Status == TableSessionStatus.Open && !s.IsDeleted, ct);
+
+        var msg = string.IsNullOrWhiteSpace(request.Reason) ? "Bàn yêu cầu nhân viên hỗ trợ" : request.Reason.Trim();
+
+        var notification = new TableNotification
+        {
+            Id = Guid.NewGuid(),
+            BranchId = table.BranchId,
+            TableId = table.Id,
+            SessionId = session?.Id,
+            Type = "CallStaff",
+            Message = msg,
+            IsHandled = false,
+            CreatedAt = DateTime.UtcNow
+        };
+
+        db.TableNotifications.Add(notification);
+        await db.SaveChangesAsync(ct);
+
+        return new TableNotificationDto
+        {
+            Id = notification.Id,
+            BranchId = notification.BranchId,
+            TableId = notification.TableId,
+            TableCode = table.Code,
+            TableName = table.Name ?? table.Code,
+            AreaName = area?.Name ?? string.Empty,
+            Type = notification.Type,
+            Message = notification.Message,
+            IsHandled = notification.IsHandled,
+            CreatedAt = notification.CreatedAt
+        };
+    }
+
+    public async Task<TableNotificationDto> RequestBillAsync(RequestBillRequest request, CancellationToken ct = default)
+    {
+        var table = await db.Tables.FirstOrDefaultAsync(x => x.QrToken == request.TableQrToken && !x.IsDeleted, ct)
+            ?? throw new InvalidOperationException("Mã QR không hợp lệ.");
+
+        var area = await db.Areas.FirstOrDefaultAsync(a => a.Id == table.AreaId, ct);
+        var session = await db.TableSessions.FirstOrDefaultAsync(s => s.TableId == table.Id && s.Status == TableSessionStatus.Open && !s.IsDeleted, ct);
+
+        if (session != null)
+        {
+            session.Status = TableSessionStatus.Paying;
+            session.UpdatedAt = DateTime.UtcNow;
+        }
+
+        var methodLabel = request.PaymentMethod switch
+        {
+            "VietQr" => "Chuyển khoản VietQR",
+            "Card" => "Thẻ / POS",
+            _ => "Tiền mặt"
+        };
+
+        var msg = $"Khách yêu cầu tính tiền ({methodLabel}){(string.IsNullOrWhiteSpace(request.Note) ? "" : $" - {request.Note}")}";
+
+        var notification = new TableNotification
+        {
+            Id = Guid.NewGuid(),
+            BranchId = table.BranchId,
+            TableId = table.Id,
+            SessionId = session?.Id,
+            Type = "RequestBill",
+            Message = msg,
+            IsHandled = false,
+            CreatedAt = DateTime.UtcNow
+        };
+
+        db.TableNotifications.Add(notification);
+        await db.SaveChangesAsync(ct);
+
+        return new TableNotificationDto
+        {
+            Id = notification.Id,
+            BranchId = notification.BranchId,
+            TableId = notification.TableId,
+            TableCode = table.Code,
+            TableName = table.Name ?? table.Code,
+            AreaName = area?.Name ?? string.Empty,
+            Type = notification.Type,
+            Message = notification.Message,
+            IsHandled = notification.IsHandled,
+            CreatedAt = notification.CreatedAt
+        };
+    }
+
+    public async Task<List<TableNotificationDto>> GetActiveNotificationsAsync(Guid branchId, CancellationToken ct = default)
+    {
+        var list = await db.TableNotifications
+            .Where(n => n.BranchId == branchId && !n.IsHandled && !n.IsDeleted)
+            .OrderByDescending(n => n.CreatedAt)
+            .ToListAsync(ct);
+
+        var result = new List<TableNotificationDto>();
+        foreach (var n in list)
+        {
+            var table = await db.Tables.FirstOrDefaultAsync(t => t.Id == n.TableId, ct);
+            var area = table != null ? await db.Areas.FirstOrDefaultAsync(a => a.Id == table.AreaId, ct) : null;
+            result.Add(new TableNotificationDto
+            {
+                Id = n.Id,
+                BranchId = n.BranchId,
+                TableId = n.TableId,
+                TableCode = table?.Code ?? string.Empty,
+                TableName = table?.Name ?? table?.Code ?? string.Empty,
+                AreaName = area?.Name ?? string.Empty,
+                Type = n.Type,
+                Message = n.Message,
+                IsHandled = n.IsHandled,
+                CreatedAt = n.CreatedAt
+            });
+        }
+        return result;
+    }
+
+    public async Task DismissNotificationAsync(Guid notificationId, Guid staffUserId, CancellationToken ct = default)
+    {
+        var notif = await db.TableNotifications.FirstOrDefaultAsync(n => n.Id == notificationId && !n.IsDeleted, ct);
+        if (notif != null)
+        {
+            notif.IsHandled = true;
+            notif.HandledByUserId = staffUserId;
+            notif.HandledAt = DateTime.UtcNow;
+            notif.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+        }
     }
 
     private async Task<OrderTicket> CreateTicketAsync(

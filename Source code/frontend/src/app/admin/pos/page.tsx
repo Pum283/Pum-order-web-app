@@ -13,6 +13,7 @@ import {
   TableSessionDetailDto,
   StaffOrderLineRequest,
   StaffOrderSelectedOption,
+  TableNotificationDto,
 } from "@/shared/api/client";
 import {
   ShoppingCart,
@@ -37,6 +38,12 @@ import {
   Sparkles,
   ArrowRightLeft,
   Check,
+  Bell,
+  CheckCheck,
+  XCircle,
+  Receipt,
+  DollarSign,
+  QrCode,
 } from "lucide-react";
 
 interface CartItem {
@@ -69,6 +76,14 @@ function PosContent() {
   const [selectedTableId, setSelectedTableId] = useState<string>(initialTableId || "");
   const [currentSession, setCurrentSession] = useState<TableSessionDetailDto | null>(null);
 
+  // Notifications (STT 27, 28, 95)
+  const [notifications, setNotifications] = useState<TableNotificationDto[]>([]);
+  const [isNotifDrawerOpen, setIsNotifDrawerOpen] = useState(false);
+
+  // Reject QR Ticket Modal (STT 24)
+  const [rejectingTicketId, setRejectingTicketId] = useState<string | null>(null);
+  const [rejectReason, setRejectReason] = useState<string>("Bếp hết nguyên liệu");
+
   // Filter & Search state
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>("ALL");
   const [searchKeyword, setSearchKeyword] = useState<string>("");
@@ -80,7 +95,7 @@ function PosContent() {
 
   // Option Customization Modal state
   const [customizingItem, setCustomizingItem] = useState<MenuItemDetailDto | null>(null);
-  const [optionSelections, setOptionSelections] = useState<Record<string, string[]>>({}); // optionId -> array of selected valueIds
+  const [optionSelections, setOptionSelections] = useState<Record<string, string[]>>({});
   const [customizingNote, setCustomizingNote] = useState<string>("");
   const [customizingQuantity, setCustomizingQuantity] = useState<number>(1);
 
@@ -89,12 +104,20 @@ function PosContent() {
   const [sessionLoading, setSessionLoading] = useState(false);
   const [submittingOrder, setSubmittingOrder] = useState(false);
   const [closingSession, setClosingSession] = useState(false);
+  const [confirmingTicketId, setConfirmingTicketId] = useState<string | null>(null);
   const [notification, setNotification] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
   // Load initial data
   useEffect(() => {
     if (!activeBranchId) return;
     loadAllData();
+    loadNotifications();
+
+    // Polling notifications every 10 seconds
+    const timer = setInterval(() => {
+      loadNotifications();
+    }, 10000);
+    return () => clearInterval(timer);
   }, [activeBranchId]);
 
   const loadAllData = async () => {
@@ -111,14 +134,26 @@ function PosContent() {
       setCategories(catList);
       setMenuItems(itemList);
 
-      // Auto select first table if none selected
-      if (!selectedTableId && tableList.length > 0) {
+      // Auto select table
+      if (initialTableId && tableList.some((t) => t.id === initialTableId)) {
+        setSelectedTableId(initialTableId);
+      } else if (!selectedTableId && tableList.length > 0) {
         setSelectedTableId(tableList[0].id);
       }
     } catch (err: any) {
       setNotification({ type: "error", message: err.message || "Không thể tải dữ liệu POS." });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadNotifications = async () => {
+    if (!activeBranchId) return;
+    try {
+      const list = await api.getNotifications(activeBranchId);
+      setNotifications(list);
+    } catch (err) {
+      console.error(err);
     }
   };
 
@@ -134,7 +169,6 @@ function PosContent() {
   const loadTableSession = async (tableId: string) => {
     try {
       setSessionLoading(true);
-      // Try to get active session
       try {
         const session = await api.getActiveSessionByTable(tableId);
         setCurrentSession(session);
@@ -142,7 +176,6 @@ function PosContent() {
           setActiveCartTab("current");
         }
       } catch {
-        // Table does not have an open session
         setCurrentSession(null);
       }
     } catch (err: any) {
@@ -158,7 +191,6 @@ function PosContent() {
       setSessionLoading(true);
       const newSession = await api.openSession(selectedTableId, guestCount);
       setCurrentSession(newSession);
-      // Refresh table status in tables list
       setTables((prev) =>
         prev.map((t) => (t.id === selectedTableId ? { ...t, status: "Occupied" } : t))
       );
@@ -196,6 +228,55 @@ function PosContent() {
     }
   };
 
+  // STT 24: Confirm QR Ticket to Kitchen
+  const handleConfirmQrTicket = async (ticketId: string) => {
+    try {
+      setConfirmingTicketId(ticketId);
+      await api.confirmQrTicket(ticketId);
+      if (currentSession) {
+        const updated = await api.getSessionById(currentSession.id);
+        setCurrentSession(updated);
+      }
+      setNotification({
+        type: "success",
+        message: "Đã duyệt và chuyển các món từ khách QR vào Bếp/Bar chế biến!",
+      });
+    } catch (err: any) {
+      setNotification({ type: "error", message: err.message || "Lỗi khi duyệt order." });
+    } finally {
+      setConfirmingTicketId(null);
+    }
+  };
+
+  // STT 24: Reject QR Ticket
+  const handleRejectQrTicket = async () => {
+    if (!rejectingTicketId) return;
+    try {
+      await api.rejectQrTicket(rejectingTicketId, rejectReason);
+      setRejectingTicketId(null);
+      if (currentSession) {
+        const updated = await api.getSessionById(currentSession.id);
+        setCurrentSession(updated);
+      }
+      setNotification({
+        type: "success",
+        message: `Đã từ chối đợt gọi món QR với lý do: "${rejectReason}"`,
+      });
+    } catch (err: any) {
+      setNotification({ type: "error", message: err.message || "Lỗi khi từ chối order." });
+    }
+  };
+
+  // STT 95: Dismiss Notification
+  const handleDismissNotification = async (notifId: string) => {
+    try {
+      await api.dismissNotification(notifId);
+      setNotifications((prev) => prev.filter((n) => n.id !== notifId));
+    } catch (err: any) {
+      console.error(err);
+    }
+  };
+
   // Filtered menu items
   const filteredMenuItems = useMemo(() => {
     return menuItems.filter((item) => {
@@ -211,7 +292,6 @@ function PosContent() {
   // Click menu item -> Check if has options
   const handleItemClick = async (item: MenuItemDto) => {
     if (item.optionsCount && item.optionsCount > 0) {
-      // Fetch full details with options
       try {
         const fullItem = await api.getMenuItemById(item.id);
         openCustomizationModal(fullItem);
@@ -219,7 +299,6 @@ function PosContent() {
         setNotification({ type: "error", message: "Lỗi tải tùy chọn món." });
       }
     } else {
-      // Add directly
       addDirectToCart(item);
     }
   };
@@ -255,7 +334,6 @@ function PosContent() {
     setCustomizingQuantity(1);
     setCustomizingNote("");
 
-    // Set default selections
     const defaults: Record<string, string[]> = {};
     item.options.forEach((opt) => {
       if (opt.optionType === "Single") {
@@ -284,7 +362,6 @@ function PosContent() {
     });
   };
 
-  // Calculate current customized unit price
   const customizedUnitPrice = useMemo(() => {
     if (!customizingItem) return 0;
     let extra = 0;
@@ -302,7 +379,6 @@ function PosContent() {
   const confirmCustomization = () => {
     if (!customizingItem) return;
 
-    // Build selected options DTO
     const selectedList: StaffOrderSelectedOption[] = [];
     customizingItem.options.forEach((opt) => {
       const selectedValIds = optionSelections[opt.id] || [];
@@ -368,7 +444,7 @@ function PosContent() {
     return cart.reduce((sum, item) => sum + item.quantity, 0);
   }, [cart]);
 
-  // Submit Order to KDS (Send straight to kitchen)
+  // Submit Order to KDS
   const handleSubmitOrderToKitchen = async () => {
     if (!selectedTableId) {
       setNotification({ type: "error", message: "Vui lòng chọn bàn phục vụ." });
@@ -383,7 +459,6 @@ function PosContent() {
     try {
       setSubmittingOrder(true);
 
-      // Ensure open session
       let targetSession = currentSession;
       if (!targetSession) {
         targetSession = await api.openSession(selectedTableId, 2);
@@ -403,16 +478,13 @@ function PosContent() {
         lines,
       });
 
-      // Clear cart
       setCart([]);
       setTicketNote("");
 
-      // Reload full session history
       const updatedSession = await api.getSessionById(targetSession.id);
       setCurrentSession(updatedSession);
       setActiveCartTab("history");
 
-      // Update table status
       setTables((prev) =>
         prev.map((t) => (t.id === selectedTableId ? { ...t, status: "Occupied" } : t))
       );
@@ -430,6 +502,14 @@ function PosContent() {
 
   const selectedTable = tables.find((t) => t.id === selectedTableId);
 
+  // Check if current session has any pending QR tickets
+  const pendingQrTickets = useMemo(() => {
+    if (!currentSession) return [];
+    return currentSession.tickets.filter(
+      (t) => t.source === "CustomerQr" && t.lines.some((l) => l.status === "PendingConfirm")
+    );
+  }, [currentSession]);
+
   const getStationIcon = (station: string) => {
     switch (station) {
       case "Bar":
@@ -443,6 +523,12 @@ function PosContent() {
 
   const getStatusBadge = (status: string) => {
     switch (status) {
+      case "PendingConfirm":
+        return (
+          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
+            <Clock className="w-3 h-3 animate-spin" /> Chờ xác nhận
+          </span>
+        );
       case "SentToKitchen":
         return (
           <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20 flex items-center gap-1">
@@ -465,6 +551,12 @@ function PosContent() {
         return (
           <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-stone-700 text-stone-300 border border-stone-600 flex items-center gap-1">
             <Check className="w-3 h-3" /> Đã phục vụ
+          </span>
+        );
+      case "Cancelled":
+        return (
+          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/30 flex items-center gap-1">
+            <X className="w-3 h-3" /> Đã từ chối
           </span>
         );
       default:
@@ -540,8 +632,23 @@ function PosContent() {
           )}
         </div>
 
-        {/* Session Status & Quick Actions */}
+        {/* Notifications & Session Status */}
         <div className="flex items-center gap-3">
+          {/* Realtime Notification Bell (STT 95) */}
+          <button
+            onClick={() => setIsNotifDrawerOpen(!isNotifDrawerOpen)}
+            className="relative p-2 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-300 border border-stone-700 transition shadow-sm flex items-center gap-1.5 text-xs font-bold"
+            title="Thông báo phục vụ & thanh toán từ bàn"
+          >
+            <Bell className="w-4 h-4 text-amber-400" />
+            <span className="hidden sm:inline">Thông báo</span>
+            {notifications.length > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full bg-rose-500 text-white text-[10px] font-black animate-pulse">
+                {notifications.length}
+              </span>
+            )}
+          </button>
+
           {sessionLoading ? (
             <div className="flex items-center gap-2 text-xs text-amber-400 animate-pulse">
               <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Đang cập nhật phiên...
@@ -586,6 +693,24 @@ function PosContent() {
           )}
         </div>
       </header>
+
+      {/* STT 24 Alert: Pending Confirm QR Orders on Current Table */}
+      {pendingQrTickets.length > 0 && (
+        <div className="bg-amber-500/10 border-b border-amber-500/30 px-4 py-2 flex items-center justify-between gap-3 text-amber-300 text-xs font-bold animate-in fade-in">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-amber-400 animate-bounce" />
+            <span>
+              Bàn này có {pendingQrTickets.length} đợt đặt món từ khách quét QR đang chờ xác nhận!
+            </span>
+          </div>
+          <button
+            onClick={() => setActiveCartTab("history")}
+            className="px-3 py-1 rounded-lg bg-amber-500 text-stone-950 text-xs font-black shadow-sm"
+          >
+            Xem & Duyệt ngay
+          </button>
+        </div>
+      )}
 
       {/* Main Dual View Area */}
       <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
@@ -740,7 +865,7 @@ function PosContent() {
 
             <button
               onClick={() => setActiveCartTab("history")}
-              className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+              className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 relative ${
                 activeCartTab === "history"
                   ? "bg-amber-500 text-stone-950 shadow-md shadow-amber-500/20"
                   : "text-stone-400 hover:text-stone-200 bg-stone-950/40"
@@ -748,6 +873,9 @@ function PosContent() {
             >
               <History className="w-4 h-4" />
               <span>Đã gọi bàn ({currentSession?.totalItemsCount || 0})</span>
+              {pendingQrTickets.length > 0 && (
+                <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping absolute -top-0.5 -right-0.5" />
+              )}
             </button>
           </div>
 
@@ -890,69 +1018,105 @@ function PosContent() {
             </div>
           )}
 
-          {/* TAB 2: SESSION TICKETS HISTORY */}
+          {/* TAB 2: SESSION TICKETS HISTORY & STT 24 CONFIRMATION */}
           {activeCartTab === "history" && (
             <div className="flex-1 flex flex-col justify-between overflow-hidden">
               <div className="flex-1 overflow-y-auto p-3 space-y-3">
                 {currentSession && currentSession.tickets.length > 0 ? (
-                  currentSession.tickets.map((ticket) => (
-                    <div
-                      key={ticket.id}
-                      className="rounded-xl bg-stone-950 border border-stone-800 p-3 flex flex-col gap-2"
-                    >
-                      <div className="flex items-center justify-between pb-1.5 border-b border-stone-800/80">
-                        <div className="flex items-center gap-2">
-                          <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[10px] font-bold">
-                            Đợt #{ticket.ticketNumber}
-                          </span>
-                          <span className="text-[11px] text-stone-400">
-                            {new Date(ticket.orderedAt).toLocaleTimeString("vi-VN", {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
+                  currentSession.tickets.map((ticket) => {
+                    const isPendingQr =
+                      ticket.source === "CustomerQr" &&
+                      ticket.lines.some((l) => l.status === "PendingConfirm");
+
+                    return (
+                      <div
+                        key={ticket.id}
+                        className={`rounded-xl border p-3 flex flex-col gap-2 ${
+                          isPendingQr
+                            ? "bg-amber-950/40 border-amber-500/50 shadow-lg shadow-amber-500/5 ring-1 ring-amber-500/30"
+                            : "bg-stone-950 border-stone-800"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between pb-1.5 border-b border-stone-800/80">
+                          <div className="flex items-center gap-2">
+                            <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[10px] font-bold">
+                              Đợt #{ticket.ticketNumber}
+                            </span>
+                            <span className="text-[11px] text-stone-400">
+                              {new Date(ticket.orderedAt).toLocaleTimeString("vi-VN", {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                            </span>
+                          </div>
+                          <span className="text-[10px] font-semibold text-stone-400">
+                            {ticket.source === "StaffAssisted" ? "👨‍💼 NV ghi món" : "📱 Khách quét QR"}
                           </span>
                         </div>
-                        <span className="text-[10px] text-stone-400">
-                          {ticket.source === "StaffAssisted" ? "NV ghi món" : "Khách quét QR"}
-                        </span>
-                      </div>
 
-                      {/* Ticket Lines */}
-                      <div className="space-y-1.5">
-                        {ticket.lines.map((line) => (
-                          <div key={line.id} className="flex items-start justify-between gap-2 text-xs">
-                            <div className="flex-1">
-                              <div className="flex items-center gap-1.5">
-                                <span className="font-bold text-stone-200">
-                                  {line.quantity}x {line.itemName}
-                                </span>
+                        {/* Ticket Lines */}
+                        <div className="space-y-1.5">
+                          {ticket.lines.map((line) => (
+                            <div key={line.id} className="flex items-start justify-between gap-2 text-xs">
+                              <div className="flex-1">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-bold text-stone-200">
+                                    {line.quantity}x {line.itemName}
+                                  </span>
+                                </div>
+                                {line.selectedOptionsText && (
+                                  <p className="text-[10px] text-stone-400 mt-0.5">
+                                    {line.selectedOptionsText}
+                                  </p>
+                                )}
+                                {line.note && (
+                                  <p className="text-[10px] text-amber-400/90 italic">* {line.note}</p>
+                                )}
                               </div>
-                              {line.selectedOptionsText && (
-                                <p className="text-[10px] text-stone-400 mt-0.5">
-                                  {line.selectedOptionsText}
-                                </p>
-                              )}
-                              {line.note && (
-                                <p className="text-[10px] text-amber-400/90 italic">* {line.note}</p>
-                              )}
+                              <div className="flex flex-col items-end gap-1">
+                                <span className="font-mono text-stone-300">
+                                  {line.totalPrice.toLocaleString("vi-VN")}đ
+                                </span>
+                                {getStatusBadge(line.status)}
+                              </div>
                             </div>
-                            <div className="flex flex-col items-end gap-1">
-                              <span className="font-mono text-stone-300">
-                                {line.totalPrice.toLocaleString("vi-VN")}đ
-                              </span>
-                              {getStatusBadge(line.status)}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
+                          ))}
+                        </div>
 
-                      {ticket.note && (
-                        <p className="text-[11px] text-amber-400 italic bg-amber-500/5 px-2 py-1 rounded border border-amber-500/10">
-                          Ghi chú đợt: {ticket.note}
-                        </p>
-                      )}
-                    </div>
-                  ))
+                        {ticket.note && (
+                          <p className="text-[11px] text-amber-400 italic bg-amber-500/5 px-2 py-1 rounded border border-amber-500/10">
+                            Ghi chú: {ticket.note}
+                          </p>
+                        )}
+
+                        {/* STT 24: Action bar for PendingConfirm QR orders */}
+                        {isPendingQr && (
+                          <div className="mt-2 pt-2 border-t border-amber-500/20 flex items-center gap-2">
+                            <button
+                              onClick={() => setRejectingTicketId(ticket.id)}
+                              className="px-2.5 py-1.5 rounded-lg bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-500/30 text-[11px] font-bold transition flex items-center gap-1"
+                            >
+                              <XCircle className="w-3.5 h-3.5" />
+                              <span>Từ chối</span>
+                            </button>
+
+                            <button
+                              onClick={() => handleConfirmQrTicket(ticket.id)}
+                              disabled={confirmingTicketId === ticket.id}
+                              className="flex-1 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-stone-950 text-[11px] font-black shadow-md transition flex items-center justify-center gap-1"
+                            >
+                              {confirmingTicketId === ticket.id ? (
+                                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <CheckCheck className="w-3.5 h-3.5" />
+                              )}
+                              <span>Xác nhận & Gửi Bếp</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
                 ) : (
                   <div className="h-48 flex flex-col items-center justify-center text-stone-500">
                     <History className="w-8 h-8 mb-2 stroke-[1.5] text-stone-600" />
@@ -984,6 +1148,118 @@ function PosContent() {
           )}
         </aside>
       </div>
+
+      {/* ============================================================== */}
+      {/* DRAWER: REALTIME NOTIFICATIONS (STT 95, 27, 28)                */}
+      {/* ============================================================== */}
+      {isNotifDrawerOpen && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex justify-end backdrop-blur-sm">
+          <div className="bg-stone-900 border-l border-stone-800 w-full max-w-sm h-full flex flex-col p-4 space-y-4 animate-in slide-in-from-right duration-200">
+            <div className="flex items-center justify-between pb-3 border-b border-stone-800">
+              <div className="flex items-center gap-2">
+                <Bell className="w-5 h-5 text-amber-400" />
+                <h3 className="text-sm font-bold text-white">Yêu cầu từ bàn phục vụ</h3>
+              </div>
+              <button onClick={() => setIsNotifDrawerOpen(false)} className="text-stone-400 hover:text-white">
+                ✕
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto space-y-2.5">
+              {notifications.map((n) => (
+                <div
+                  key={n.id}
+                  className={`p-3 rounded-xl border flex flex-col gap-2 ${
+                    n.type === "RequestBill"
+                      ? "bg-emerald-950/40 border-emerald-500/40 text-emerald-200"
+                      : "bg-stone-950 border-stone-800 text-stone-200"
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-xs text-amber-400">
+                      {n.tableName || n.tableCode} ({n.areaName})
+                    </span>
+                    <span className="text-[10px] text-stone-400">
+                      {new Date(n.createdAt).toLocaleTimeString("vi-VN", {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </span>
+                  </div>
+
+                  <p className="text-xs font-semibold leading-snug">{n.message}</p>
+
+                  <div className="flex justify-end pt-1">
+                    <button
+                      onClick={() => handleDismissNotification(n.id)}
+                      className="px-2.5 py-1 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-300 text-[11px] font-bold transition flex items-center gap-1"
+                    >
+                      <Check className="w-3 h-3 text-emerald-400" />
+                      <span>Đã xử lý xong</span>
+                    </button>
+                  </div>
+                </div>
+              ))}
+
+              {notifications.length === 0 && (
+                <div className="h-48 flex flex-col items-center justify-center text-stone-500 text-center">
+                  <Bell className="w-8 h-8 mb-2 text-stone-600 stroke-[1.5]" />
+                  <p className="text-xs">Không có yêu cầu phục vụ nào đang chờ.</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================== */}
+      {/* MODAL: REJECT QR TICKET (STT 24)                               */}
+      {/* ============================================================== */}
+      {rejectingTicketId && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-stone-900 border border-stone-800 rounded-2xl w-full max-w-sm p-5 space-y-4 shadow-2xl animate-in fade-in zoom-in-95">
+            <h3 className="text-sm font-bold text-white">Từ chối đợt đặt món của khách QR</h3>
+            <p className="text-xs text-stone-400">Vui lòng chọn hoặc nhập lý do từ chối:</p>
+
+            <div className="space-y-2">
+              {[
+                "Bếp hết nguyên liệu",
+                "Món tạm ngưng phục vụ",
+                "Khách gọi nhầm bàn",
+                "Khách yêu cầu hủy",
+              ].map((reason) => (
+                <button
+                  key={reason}
+                  type="button"
+                  onClick={() => setRejectReason(reason)}
+                  className={`w-full p-2 rounded-xl text-xs text-left border transition ${
+                    rejectReason === reason
+                      ? "bg-rose-500/20 text-rose-300 border-rose-500 font-bold"
+                      : "bg-stone-950 border-stone-800 text-stone-300"
+                  }`}
+                >
+                  {reason}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-2 pt-2">
+              <button
+                onClick={() => setRejectingTicketId(null)}
+                className="flex-1 py-2 rounded-xl bg-stone-800 text-stone-300 text-xs font-bold"
+              >
+                Hủy
+              </button>
+              <button
+                onClick={handleRejectQrTicket}
+                className="flex-1 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-md"
+              >
+                Xác nhận từ chối
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ============================================================== */}
       {/* MODAL: CUSTOMIZE ITEM OPTIONS & TOPPINGS                       */}

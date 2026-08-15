@@ -84,15 +84,15 @@ _Luồng khách tự phục vụ — bổ sung song song với NV order hộ._
 
 _Chống spam chỉ với order từ khách QR + gọi NV/thanh toán._
 
-- [ ] (24) Gửi order tới bếp/NV xác nhận trước khi chế biến (chỉ order từ khách QR)
-- [ ] (27) Gọi nhân viên (realtime + số bàn)
-- [ ] (28) Gọi thanh toán.
+- [x] (24) Gửi order tới bếp/NV xác nhận trước khi chế biến (chỉ order từ khách QR)
+- [x] (27) Gọi nhân viên (realtime + số bàn)
+- [x] (28) Gọi thanh toán.
 
 ### Bước 1.9 — Thông báo realtime nhân viên
 
 _Hạ tầng push cho order mới / gọi NV / gọi TT._
 
-- [ ] (95) Thông báo realtime cho nhân viên (order mới, gọi NV, gọi TT, món sẵn sàng)
+- [x] (95) Thông báo realtime cho nhân viên (order mới, gọi NV, gọi TT, món sẵn sàng)
 
 ### Bước 1.10 — KDS cơ bản
 

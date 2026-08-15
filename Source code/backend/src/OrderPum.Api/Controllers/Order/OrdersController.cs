@@ -67,7 +67,7 @@ public class OrdersController(IOrderService orders, IHubContext<OrderHub> hub) :
     }
 
     // ==========================================
-    // QR GUEST ENDPOINTS (STT 22, 23, 24, 25)
+    // QR GUEST ENDPOINTS (STT 22, 23, 24, 25, 27, 28)
     // ==========================================
 
     [HttpGet("qr/info")]
@@ -123,6 +123,69 @@ public class OrdersController(IOrderService orders, IHubContext<OrderHub> hub) :
         var userId = GetUserId();
         await orders.ConfirmQrTicketAsync(ticketId, userId, ct);
         await hub.Clients.All.SendAsync("order.confirmed", ticketId, ct);
+        return NoContent();
+    }
+
+    [HttpPost("qr/{ticketId:guid}/reject")]
+    [Authorize]
+    public async Task<IActionResult> RejectQr(Guid ticketId, [FromBody] RejectQrTicketRequest request, CancellationToken ct)
+    {
+        var userId = GetUserId();
+        await orders.RejectQrTicketAsync(ticketId, request.Reason, userId, ct);
+        await hub.Clients.All.SendAsync("order.rejected", new { ticketId, reason = request.Reason }, ct);
+        return NoContent();
+    }
+
+    // STT 27: Gọi nhân viên
+    [HttpPost("qr/call-staff")]
+    [AllowAnonymous]
+    public async Task<ActionResult<TableNotificationDto>> CallStaff([FromBody] CallStaffRequest request, CancellationToken ct)
+    {
+        try
+        {
+            var notification = await orders.CallStaffAsync(request, ct);
+            await hub.Clients.All.SendAsync("staff.called", notification, ct);
+            return Ok(notification);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    // STT 28: Gọi thanh toán
+    [HttpPost("qr/request-bill")]
+    [AllowAnonymous]
+    public async Task<ActionResult<TableNotificationDto>> RequestBill([FromBody] RequestBillRequest request, CancellationToken ct)
+    {
+        try
+        {
+            var notification = await orders.RequestBillAsync(request, ct);
+            await hub.Clients.All.SendAsync("bill.requested", notification, ct);
+            return Ok(notification);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    // STT 95: Danh sách thông báo realtime tại chi nhánh
+    [HttpGet("notifications")]
+    [Authorize]
+    public async Task<ActionResult<List<TableNotificationDto>>> GetNotifications([FromQuery] Guid branchId, CancellationToken ct)
+    {
+        var list = await orders.GetActiveNotificationsAsync(branchId, ct);
+        return Ok(list);
+    }
+
+    [HttpPost("notifications/{notificationId:guid}/dismiss")]
+    [Authorize]
+    public async Task<IActionResult> DismissNotification(Guid notificationId, CancellationToken ct)
+    {
+        var userId = GetUserId();
+        await orders.DismissNotificationAsync(notificationId, userId, ct);
+        await hub.Clients.All.SendAsync("notification.dismissed", notificationId, ct);
         return NoContent();
     }
 }

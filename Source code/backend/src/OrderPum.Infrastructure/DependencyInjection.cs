@@ -163,6 +163,24 @@ public static class DependencyInjection
                 IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('OrderLines') AND name = 'ServedAt')
                     ALTER TABLE [OrderLines] ADD [ServedAt] DATETIME2 NULL;
             END
+
+            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'TableNotifications')
+            BEGIN
+                CREATE TABLE [TableNotifications] (
+                    [Id] UNIQUEIDENTIFIER NOT NULL PRIMARY KEY,
+                    [BranchId] UNIQUEIDENTIFIER NOT NULL,
+                    [TableId] UNIQUEIDENTIFIER NOT NULL,
+                    [SessionId] UNIQUEIDENTIFIER NULL,
+                    [Type] NVARCHAR(50) NOT NULL DEFAULT 'CallStaff',
+                    [Message] NVARCHAR(500) NOT NULL,
+                    [IsHandled] BIT NOT NULL DEFAULT 0,
+                    [HandledByUserId] UNIQUEIDENTIFIER NULL,
+                    [HandledAt] DATETIME2 NULL,
+                    [CreatedAt] DATETIME2 NOT NULL,
+                    [UpdatedAt] DATETIME2 NULL,
+                    [IsDeleted] BIT NOT NULL DEFAULT 0
+                );
+            END
         ");
 
         // 1. Seed Bảng Roles (Bảng Vai trò động trong CSDL)

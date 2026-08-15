@@ -109,3 +109,35 @@ public class QrTableInfoDto
     public List<MenuCategoryDto> Categories { get; set; } = [];
     public List<MenuItemDetailDto> MenuItems { get; set; } = [];
 }
+
+public class CallStaffRequest
+{
+    public string TableQrToken { get; set; } = string.Empty;
+    public string? Reason { get; set; } // "Cần hỗ trợ", "Lấy thêm đá", "Thêm bát đĩa", "Gặp quản lý"
+}
+
+public class RequestBillRequest
+{
+    public string TableQrToken { get; set; } = string.Empty;
+    public string PaymentMethod { get; set; } = "Cash"; // "Cash", "VietQr", "Card"
+    public string? Note { get; set; }
+}
+
+public class RejectQrTicketRequest
+{
+    public string Reason { get; set; } = string.Empty;
+}
+
+public class TableNotificationDto
+{
+    public Guid Id { get; set; }
+    public Guid BranchId { get; set; }
+    public Guid TableId { get; set; }
+    public string TableCode { get; set; } = string.Empty;
+    public string TableName { get; set; } = string.Empty;
+    public string AreaName { get; set; } = string.Empty;
+    public string Type { get; set; } = "CallStaff";
+    public string Message { get; set; } = string.Empty;
+    public bool IsHandled { get; set; }
+    public DateTime CreatedAt { get; set; }
+}

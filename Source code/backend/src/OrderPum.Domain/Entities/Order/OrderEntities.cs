@@ -41,3 +41,15 @@ public class OrderLine : EntityBase
     public DateTime? ReadyAt { get; set; }
     public DateTime? ServedAt { get; set; }
 }
+
+public class TableNotification : EntityBase
+{
+    public Guid BranchId { get; set; }
+    public Guid TableId { get; set; }
+    public Guid? SessionId { get; set; }
+    public string Type { get; set; } = "CallStaff"; // CallStaff, RequestBill, NewQrOrder, ItemReady
+    public string Message { get; set; } = string.Empty;
+    public bool IsHandled { get; set; } = false;
+    public Guid? HandledByUserId { get; set; }
+    public DateTime? HandledAt { get; set; }
+}
