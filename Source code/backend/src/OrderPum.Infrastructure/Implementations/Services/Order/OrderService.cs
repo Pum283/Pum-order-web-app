@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using OrderPum.Application.DTOs.Menu;
 using OrderPum.Application.DTOs.Order;
 using OrderPum.Application.Interfaces.Services.Order;
 using OrderPum.Domain.Entities.Order;
@@ -151,7 +152,7 @@ public class OrderService(AppDbContext db) : IOrderService
     public async Task<OrderTicketDto> PlaceQrOrderAsync(QrPlaceOrderRequest request, CancellationToken ct = default)
     {
         var table = await db.Tables.FirstOrDefaultAsync(x => x.QrToken == request.TableQrToken && !x.IsDeleted, ct)
-            ?? throw new InvalidOperationException("Mã QR bàn không hợp lệ.");
+            ?? throw new InvalidOperationException("Mã QR bàn không hợp lệ hoặc đã bị vô hiệu hóa.");
 
         var session = await db.TableSessions
             .FirstOrDefaultAsync(x => x.TableId == table.Id && x.Status == TableSessionStatus.Open && !x.IsDeleted, ct);
@@ -169,12 +170,18 @@ public class OrderService(AppDbContext db) : IOrderService
                 OpenedAt = DateTime.UtcNow,
                 CreatedAt = DateTime.UtcNow
             };
-            table.Status = "Occupied";
-            table.UpdatedAt = DateTime.UtcNow;
             db.TableSessions.Add(session);
-            await db.SaveChangesAsync(ct);
         }
 
+        if (table.Status != "Occupied")
+        {
+            table.Status = "Occupied";
+            table.UpdatedAt = DateTime.UtcNow;
+        }
+
+        await db.SaveChangesAsync(ct);
+
+        // QR Orders start with PendingConfirm (waiting for staff confirmation - STT 24)
         var ticket = await CreateTicketAsync(session, OrderSource.CustomerQr, null, request.Note, request.Lines, sendStraightToKitchen: false, ct);
         return await MapTicketDtoAsync(ticket.Id, ct);
     }
@@ -215,6 +222,115 @@ public class OrderService(AppDbContext db) : IOrderService
 
         await db.SaveChangesAsync(ct);
         return true;
+    }
+
+    public async Task<QrTableInfoDto> GetQrTableInfoAsync(string qrToken, CancellationToken ct = default)
+    {
+        var table = await db.Tables.FirstOrDefaultAsync(x => x.QrToken == qrToken && !x.IsDeleted, ct)
+            ?? throw new InvalidOperationException("Mã QR không hợp lệ hoặc đã bị thay đổi. Vui lòng quét lại mã QR tại bàn.");
+
+        var area = await db.Areas.FirstOrDefaultAsync(a => a.Id == table.AreaId, ct);
+        var branch = await db.Branches.FirstOrDefaultAsync(b => b.Id == table.BranchId, ct)
+            ?? throw new InvalidOperationException("Không tìm thấy thông tin chi nhánh.");
+
+        // Active Session
+        var session = await GetActiveSessionByTableAsync(table.Id, ct);
+
+        // Categories
+        var categories = await db.MenuCategories
+            .Where(c => c.BranchId == table.BranchId && c.IsActive && !c.IsDeleted)
+            .OrderBy(c => c.SortOrder)
+            .ThenBy(c => c.Name)
+            .Select(c => new MenuCategoryDto
+            {
+                Id = c.Id,
+                BranchId = c.BranchId,
+                Code = c.Code,
+                Name = c.Name,
+                SortOrder = c.SortOrder,
+                ImageUrl = c.ImageUrl,
+                IsActive = c.IsActive,
+                CreatedAt = c.CreatedAt
+            })
+            .ToListAsync(ct);
+
+        // Menu Items with Options and Values
+        var menuItemsDb = await db.MenuItems
+            .Include(m => m.Category)
+            .Include(m => m.Options.OrderBy(o => o.SortOrder))
+                .ThenInclude(o => o.Values.OrderBy(v => v.SortOrder))
+            .Where(m => m.BranchId == table.BranchId && m.IsActive && m.IsAvailable && !m.Is86ed && !m.IsDeleted)
+            .OrderBy(m => m.Category != null ? m.Category.SortOrder : 99)
+            .ThenBy(m => m.Name)
+            .ToListAsync(ct);
+
+        var menuItemDtos = menuItemsDb.Select(m => new MenuItemDetailDto
+        {
+            Id = m.Id,
+            BranchId = m.BranchId,
+            CategoryId = m.CategoryId,
+            CategoryName = m.Category?.Name ?? string.Empty,
+            Code = m.Code,
+            Name = m.Name,
+            Description = m.Description,
+            ImageUrl = m.ImageUrl,
+            Price = m.Price,
+            Unit = m.Unit,
+            KitchenStation = m.KitchenStation,
+            PreparationMinutes = m.PreparationMinutes,
+            IsAvailable = m.IsAvailable,
+            Is86ed = m.Is86ed,
+            IsActive = m.IsActive,
+            CreatedAt = m.CreatedAt,
+            Options = m.Options.Where(o => !o.IsDeleted).Select(o => new MenuItemOptionDto
+            {
+                Id = o.Id,
+                MenuItemId = o.MenuItemId,
+                Name = o.Name,
+                OptionType = o.OptionType,
+                IsRequired = o.IsRequired,
+                SortOrder = o.SortOrder,
+                Values = o.Values.Where(v => !v.IsDeleted && v.IsAvailable).Select(v => new MenuItemOptionValueDto
+                {
+                    Id = v.Id,
+                    OptionId = v.OptionId,
+                    Name = v.Name,
+                    ExtraPrice = v.ExtraPrice,
+                    IsDefault = v.IsDefault,
+                    IsAvailable = v.IsAvailable,
+                    SortOrder = v.SortOrder
+                }).ToList()
+            }).ToList()
+        }).ToList();
+
+        return new QrTableInfoDto
+        {
+            TableId = table.Id,
+            TableCode = table.Code,
+            TableName = table.Name ?? table.Code,
+            AreaName = area?.Name ?? string.Empty,
+            Capacity = table.Capacity,
+            QrToken = table.QrToken,
+            BranchId = branch.Id,
+            BranchName = branch.Name,
+            BranchAddress = branch.Address ?? string.Empty,
+            BranchPhone = branch.Phone ?? string.Empty,
+            Currency = branch.Currency ?? "VND",
+            TaxRatePercent = branch.TaxRatePercent,
+            ServiceChargePercent = branch.ServiceChargePercent,
+            IsTaxIncludedInPrice = branch.IsTaxIncludedInPrice,
+            CurrentSession = session,
+            Categories = categories,
+            MenuItems = menuItemDtos
+        };
+    }
+
+    public async Task<TableSessionDetailDto?> GetQrSessionStatusAsync(string qrToken, CancellationToken ct = default)
+    {
+        var table = await db.Tables.FirstOrDefaultAsync(x => x.QrToken == qrToken && !x.IsDeleted, ct);
+        if (table is null) return null;
+
+        return await GetActiveSessionByTableAsync(table.Id, ct);
     }
 
     private async Task<OrderTicket> CreateTicketAsync(

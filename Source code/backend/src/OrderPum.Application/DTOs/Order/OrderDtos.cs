@@ -1,3 +1,5 @@
+using OrderPum.Application.DTOs.Menu;
+
 namespace OrderPum.Application.DTOs.Order;
 
 public class OpenSessionRequest
@@ -83,4 +85,27 @@ public class TableSessionDetailDto
     public List<OrderTicketDto> Tickets { get; set; } = [];
     public decimal TotalAmount => Tickets.Sum(t => t.TicketTotal);
     public int TotalItemsCount => Tickets.Sum(t => t.Lines.Sum(l => l.Quantity));
+}
+
+public class QrTableInfoDto
+{
+    public Guid TableId { get; set; }
+    public string TableCode { get; set; } = string.Empty;
+    public string TableName { get; set; } = string.Empty;
+    public string AreaName { get; set; } = string.Empty;
+    public int Capacity { get; set; }
+    public string QrToken { get; set; } = string.Empty;
+
+    public Guid BranchId { get; set; }
+    public string BranchName { get; set; } = string.Empty;
+    public string BranchAddress { get; set; } = string.Empty;
+    public string BranchPhone { get; set; } = string.Empty;
+    public string Currency { get; set; } = "VND";
+    public decimal TaxRatePercent { get; set; }
+    public decimal ServiceChargePercent { get; set; }
+    public bool IsTaxIncludedInPrice { get; set; }
+
+    public TableSessionDetailDto? CurrentSession { get; set; }
+    public List<MenuCategoryDto> Categories { get; set; } = [];
+    public List<MenuItemDetailDto> MenuItems { get; set; } = [];
 }

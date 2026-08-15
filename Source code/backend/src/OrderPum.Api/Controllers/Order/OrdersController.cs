@@ -8,7 +8,6 @@ using OrderPum.Application.Interfaces.Services.Order;
 
 namespace OrderPum.Api.Controllers.Order;
 
-
 [ApiController]
 [Route("api/orders")]
 public class OrdersController(IOrderService orders, IHubContext<OrderHub> hub) : ControllerBase
@@ -67,13 +66,54 @@ public class OrdersController(IOrderService orders, IHubContext<OrderHub> hub) :
         return Ok(ticket);
     }
 
+    // ==========================================
+    // QR GUEST ENDPOINTS (STT 22, 23, 24, 25)
+    // ==========================================
+
+    [HttpGet("qr/info")]
+    [AllowAnonymous]
+    public async Task<ActionResult<QrTableInfoDto>> GetQrInfo([FromQuery] string token, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+            return BadRequest(new { message = "Thiếu mã QR Token của bàn." });
+
+        try
+        {
+            var info = await orders.GetQrTableInfoAsync(token.Trim(), ct);
+            return Ok(info);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpGet("qr/session")]
+    [AllowAnonymous]
+    public async Task<ActionResult<TableSessionDetailDto>> GetQrSession([FromQuery] string token, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+            return BadRequest(new { message = "Thiếu mã QR Token của bàn." });
+
+        var session = await orders.GetQrSessionStatusAsync(token.Trim(), ct);
+        return Ok(session);
+    }
+
     [HttpPost("qr")]
     [AllowAnonymous]
     public async Task<ActionResult<OrderTicketDto>> QrOrder([FromBody] QrPlaceOrderRequest request, CancellationToken ct)
     {
-        var ticket = await orders.PlaceQrOrderAsync(request, ct);
-        await hub.Clients.All.SendAsync("order.pending_confirm", ticket, ct);
-        return Ok(ticket);
+        try
+        {
+            var ticket = await orders.PlaceQrOrderAsync(request, ct);
+            // Notify staff dashboard and KDS
+            await hub.Clients.All.SendAsync("order.pending_confirm", ticket, ct);
+            return Ok(ticket);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 
     [HttpPost("qr/{ticketId:guid}/confirm")]

@@ -76,9 +76,9 @@ _Luồng phục vụ truyền thống: NV đến bàn, ghi món theo ý khách (
 
 _Luồng khách tự phục vụ — bổ sung song song với NV order hộ._
 
-- [ ] (22) Quét QR xem menu tại bàn
-- [ ] (23) Chọn món, số lượng, ghi chú, biến thể vào giỏ
-- [ ] (25) Gọi thêm món trong lúc ăn qua QR (cùng phiên; gộp với order do NV nhập hộ nếu cùng bàn)
+- [x] (22) Quét QR xem menu tại bàn
+- [x] (23) Chọn món, số lượng, ghi chú, biến thể vào giỏ
+- [x] (25) Gọi thêm món trong lúc ăn qua QR (cùng phiên; gộp với order do NV nhập hộ nếu cùng bàn)
 
 ### Bước 1.8 — Xác nhận order khách & tương tác tại bàn
 

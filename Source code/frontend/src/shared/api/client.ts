@@ -426,6 +426,26 @@ export type TableSessionDetailDto = {
   totalItemsCount: number;
 };
 
+export type QrTableInfoDto = {
+  tableId: string;
+  tableCode: string;
+  tableName: string;
+  areaName: string;
+  capacity: number;
+  qrToken: string;
+  branchId: string;
+  branchName: string;
+  branchAddress: string;
+  branchPhone: string;
+  currency: string;
+  taxRatePercent: number;
+  serviceChargePercent: number;
+  isTaxIncludedInPrice: boolean;
+  currentSession: TableSessionDetailDto | null;
+  categories: MenuCategoryDto[];
+  menuItems: MenuItemDetailDto[];
+};
+
 function getAuthToken(): string | null {
   if (typeof window === "undefined") return null;
   return localStorage.getItem("orderpum_token");
@@ -739,4 +759,11 @@ export const api = {
     request<void>(`/api/orders/qr/${ticketId}/confirm`, {
       method: "POST",
     }),
+
+  // QR Guest Methods (STT 22, 23, 25)
+  getQrTableInfo: (token: string) =>
+    request<QrTableInfoDto>(`/api/orders/qr/info?token=${encodeURIComponent(token)}`),
+
+  getQrSessionStatus: (token: string) =>
+    request<TableSessionDetailDto | null>(`/api/orders/qr/session?token=${encodeURIComponent(token)}`),
 };

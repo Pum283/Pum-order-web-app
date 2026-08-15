@@ -11,4 +11,8 @@ public interface IOrderService
     Task<OrderTicketDto> PlaceQrOrderAsync(QrPlaceOrderRequest request, CancellationToken ct = default);
     Task ConfirmQrTicketAsync(Guid ticketId, Guid staffUserId, CancellationToken ct = default);
     Task<bool> CloseSessionAsync(Guid sessionId, Guid staffUserId, CancellationToken ct = default);
+
+    // QR Guest flow (STT 22, 23, 25)
+    Task<QrTableInfoDto> GetQrTableInfoAsync(string qrToken, CancellationToken ct = default);
+    Task<TableSessionDetailDto?> GetQrSessionStatusAsync(string qrToken, CancellationToken ct = default);
 }
