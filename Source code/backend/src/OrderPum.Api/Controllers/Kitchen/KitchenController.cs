@@ -1,6 +1,8 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
+using OrderPum.Api.Hubs;
 using OrderPum.Application.DTOs.Kitchen;
 using OrderPum.Application.Interfaces.Services.Kitchen;
 
@@ -9,7 +11,7 @@ namespace OrderPum.Api.Controllers.Kitchen;
 [ApiController]
 [Route("api/kitchen")]
 [Authorize]
-public class KitchenController(IKitchenService kitchenService) : ControllerBase
+public class KitchenController(IKitchenService kitchenService, IHubContext<OrderHub> hub) : ControllerBase
 {
     private Guid? GetUserId()
     {
@@ -88,6 +90,7 @@ public class KitchenController(IKitchenService kitchenService) : ControllerBase
         {
             var userId = GetUserId();
             var result = await kitchenService.UpdateLineStatusAsync(lineId, request, userId, ct);
+            await hub.Clients.All.SendAsync("kitchen.updated", new { lineId, status = request.NewStatus }, ct);
             return Ok(result);
         }
         catch (InvalidOperationException ex)
@@ -106,6 +109,7 @@ public class KitchenController(IKitchenService kitchenService) : ControllerBase
         {
             var userId = GetUserId();
             var success = await kitchenService.UpdateTicketStatusAsync(ticketId, request, userId, ct);
+            await hub.Clients.All.SendAsync("kitchen.updated", new { ticketId, status = request.NewStatus }, ct);
             return Ok(new { success, message = "Đã cập nhật trạng thái toàn bộ món trong order." });
         }
         catch (InvalidOperationException ex)

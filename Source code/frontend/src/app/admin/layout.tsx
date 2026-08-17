@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { useAuth, getRoleBadgeStyle } from "@/shared/context/AuthContext";
 import { api } from "@/shared/api/client";
+import { useOrderSignalR } from "@/shared/api/signalr";
 import {
   Users,
   Shield,
@@ -61,25 +62,36 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     }
   };
 
-  // Live polling for table notifications
+  // Initial fetch for notifications
+  const fetchNotifs = useCallback(async () => {
+    if (!user?.branchId || !token) return;
+    try {
+      const list = await api.getNotifications(user.branchId);
+      setNotifications(Array.isArray(list) ? list : []);
+    } catch {
+      setNotifications([]);
+    }
+  }, [user?.branchId, token]);
+
   useEffect(() => {
-    if (!user || !token) return;
-    const branchId = user.branchId;
-    if (!branchId) return;
-
-    const fetchNotifs = async () => {
-      try {
-        const list = await api.getNotifications(branchId);
-        setNotifications(Array.isArray(list) ? list : []);
-      } catch {
-        setNotifications([]);
-      }
-    };
-
     fetchNotifs();
-    const interval = setInterval(fetchNotifs, 4000);
-    return () => clearInterval(interval);
-  }, [user, token]);
+  }, [fetchNotifs]);
+
+  // SignalR real-time event subscriptions
+  const { isConnected: isSignalRConnected } = useOrderSignalR({
+    onStaffCalled: (notif) => {
+      setNotifications((prev) => [notif, ...prev.filter((n) => n.id !== notif.id)]);
+    },
+    onBillRequested: (notif) => {
+      setNotifications((prev) => [notif, ...prev.filter((n) => n.id !== notif.id)]);
+    },
+    onOrderPendingConfirm: () => {
+      fetchNotifs();
+    },
+    onNotificationDismissed: (notificationId) => {
+      setNotifications((prev) => prev.filter((n) => n.id !== notificationId));
+    },
+  });
 
   useEffect(() => {
     if (!isLoading && (!token || !user)) {
@@ -421,6 +433,23 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           </div>
 
           <div className="flex items-center gap-2.5">
+            {/* Realtime Connection Status */}
+            <div
+              className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold border ${
+                isSignalRConnected
+                  ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                  : "bg-amber-500/10 text-amber-400 border-amber-500/20"
+              }`}
+              title={isSignalRConnected ? "SignalR Realtime đang kết nối trực tiếp" : "Đang kết nối lại SignalR..."}
+            >
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${
+                  isSignalRConnected ? "bg-emerald-400 animate-pulse" : "bg-amber-400"
+                }`}
+              />
+              <span>{isSignalRConnected ? "SignalR Trực tiếp" : "Đang nối..."}</span>
+            </div>
+
             {/* Realtime Notification Bell */}
             <div className="relative">
               <button
@@ -439,55 +468,61 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
               {/* Notification Dropdown */}
               {notifDropdownOpen && (
-                <div className="absolute right-0 mt-2 w-80 sm:w-96 rounded-2xl bg-stone-900 border border-stone-800 shadow-2xl z-50 p-3 space-y-2 animate-in fade-in zoom-in-95">
-                  <div className="flex items-center justify-between pb-2 border-b border-stone-800">
-                    <div className="flex items-center gap-1.5 text-xs font-bold text-white">
-                      <Bell className="w-4 h-4 text-amber-400" />
-                      <span>Thông báo từ bàn ({notifications.length})</span>
-                    </div>
-                    <Link
-                      href="/admin/pos"
-                      onClick={() => setNotifDropdownOpen(false)}
-                      className="text-[11px] font-semibold text-amber-400 hover:text-amber-300"
-                    >
-                      Đến màn hình POS →
-                    </Link>
-                  </div>
-
-                  <div className="max-h-72 overflow-y-auto space-y-2">
-                    {Array.isArray(notifications) && notifications.length > 0 ? (
-                      notifications.map((n) => (
-                        <div
-                          key={n.id}
-                          className="p-2.5 rounded-xl bg-stone-950 border border-stone-800/80 hover:border-amber-500/40 text-xs flex flex-col gap-1 transition"
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className="font-bold text-amber-400">
-                              {n.tableName || n.tableCode} ({n.areaName || "Khu vực"})
-                            </span>
-                            <span className="text-[10px] text-stone-500 font-mono">
-                              {formatTime(n.createdAt)}
-                            </span>
-                          </div>
-                          <p className="text-stone-200 text-xs leading-relaxed">{n.message}</p>
-                          <div className="flex items-center justify-end gap-2 pt-1">
-                            <Link
-                              href={`/admin/pos?tableId=${n.tableId}`}
-                              onClick={() => setNotifDropdownOpen(false)}
-                              className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-[11px] transition shadow-sm"
-                            >
-                              Xem bàn & Xử lý
-                            </Link>
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="py-6 text-center text-stone-500 text-xs">
-                        Không có yêu cầu nào đang chờ.
+                <>
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setNotifDropdownOpen(false)}
+                  />
+                  <div className="absolute right-0 mt-2 w-[calc(100vw-2rem)] max-w-sm rounded-2xl bg-stone-900 border border-stone-800 shadow-2xl z-50 p-3 space-y-2 animate-in fade-in zoom-in-95">
+                    <div className="flex items-center justify-between pb-2 border-b border-stone-800">
+                      <div className="flex items-center gap-1.5 text-xs font-bold text-white">
+                        <Bell className="w-4 h-4 text-amber-400" />
+                        <span>Thông báo từ bàn ({notifications.length})</span>
                       </div>
-                    )}
+                      <Link
+                        href="/admin/pos"
+                        onClick={() => setNotifDropdownOpen(false)}
+                        className="text-[11px] font-semibold text-amber-400 hover:text-amber-300"
+                      >
+                        Đến màn hình POS →
+                      </Link>
+                    </div>
+
+                    <div className="max-h-72 overflow-y-auto space-y-2">
+                      {Array.isArray(notifications) && notifications.length > 0 ? (
+                        notifications.map((n) => (
+                          <div
+                            key={n.id}
+                            className="p-2.5 rounded-xl bg-stone-950 border border-stone-800/80 hover:border-amber-500/40 text-xs flex flex-col gap-1 transition"
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="font-bold text-amber-400">
+                                {n.tableName || n.tableCode} ({n.areaName || "Khu vực"})
+                              </span>
+                              <span className="text-[10px] text-stone-500 font-mono">
+                                {formatTime(n.createdAt)}
+                              </span>
+                            </div>
+                            <p className="text-stone-200 text-xs leading-relaxed">{n.message}</p>
+                            <div className="flex items-center justify-end gap-2 pt-1">
+                              <Link
+                                href={`/admin/pos?tableId=${n.tableId}`}
+                                onClick={() => setNotifDropdownOpen(false)}
+                                className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-[11px] transition shadow-sm"
+                              >
+                                Xem bàn & Xử lý
+                              </Link>
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="py-6 text-center text-stone-500 text-xs">
+                          Không có yêu cầu nào đang chờ.
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
+                </>
               )}
             </div>
 
@@ -507,7 +542,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         </header>
 
         {/* Page Content Container */}
-        <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto">{children}</main>
+        <main className="flex-1 p-3 sm:p-5 lg:p-8 max-w-7xl w-full mx-auto pb-safe">{children}</main>
       </div>
 
       {/* Change Password Modal */}

@@ -18,6 +18,7 @@ import {
   VietQrInfoDto,
   PromotionDto,
 } from "@/shared/api/client";
+import { useOrderSignalR } from "@/shared/api/signalr";
 import {
   ShoppingCart,
   UtensilsCrossed,
@@ -106,6 +107,7 @@ function PosContent() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [ticketNote, setTicketNote] = useState<string>("");
   const [activeCartTab, setActiveCartTab] = useState<"current" | "history">("current");
+  const [mobilePosView, setMobilePosView] = useState<"menu" | "cart">("menu");
 
   // Option Customization Modal state
   const [customizingItem, setCustomizingItem] = useState<MenuItemDetailDto | null>(null);
@@ -149,27 +151,48 @@ function PosContent() {
   const [voucherMsg, setVoucherMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [activePromosList, setActivePromosList] = useState<PromotionDto[]>([]);
 
-  // Load initial data
+  // Load initial data on branch change
   useEffect(() => {
     if (!activeBranchId) return;
     loadAllData();
     loadNotifications();
-
-    // Polling notifications and table session every 3 seconds for realtime responsiveness
-    const timer = setInterval(() => {
-      loadNotifications();
-    }, 3000);
-    return () => clearInterval(timer);
   }, [activeBranchId]);
 
-  // Periodic silent refresh for current table session
-  useEffect(() => {
-    if (!selectedTableId) return;
-    const sessionTimer = setInterval(() => {
-      loadTableSession(selectedTableId, true);
-    }, 3000);
-    return () => clearInterval(sessionTimer);
-  }, [selectedTableId]);
+  // Real-time SignalR Event Handlers for POS
+  useOrderSignalR({
+    onOrderPendingConfirm: () => {
+      loadNotifications();
+      if (selectedTableId) loadTableSession(selectedTableId, true);
+      if (activeBranchId) api.getTables(activeBranchId).then(setTables).catch(() => {});
+    },
+    onOrderConfirmed: () => {
+      loadNotifications();
+      if (selectedTableId) loadTableSession(selectedTableId, true);
+      if (activeBranchId) api.getTables(activeBranchId).then(setTables).catch(() => {});
+    },
+    onOrderRejected: () => {
+      loadNotifications();
+      if (selectedTableId) loadTableSession(selectedTableId, true);
+    },
+    onOrderCreated: () => {
+      if (selectedTableId) loadTableSession(selectedTableId, true);
+      if (activeBranchId) api.getTables(activeBranchId).then(setTables).catch(() => {});
+    },
+    onStaffCalled: () => {
+      loadNotifications();
+    },
+    onBillRequested: () => {
+      loadNotifications();
+    },
+    onNotificationDismissed: () => {
+      loadNotifications();
+    },
+    onSessionClosed: () => {
+      loadNotifications();
+      if (selectedTableId) loadTableSession(selectedTableId, true);
+      if (activeBranchId) api.getTables(activeBranchId).then(setTables).catch(() => {});
+    },
+  });
 
   const loadAllData = async () => {
     try {
@@ -993,12 +1016,45 @@ function PosContent() {
         </div>
       )}
 
+      {/* Mobile Switcher Toolbar (lg:hidden) */}
+      <div className="lg:hidden bg-stone-900 border-b border-stone-800 p-2 flex items-center gap-2 shrink-0">
+        <button
+          type="button"
+          onClick={() => setMobilePosView("menu")}
+          className={`flex-1 py-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+            mobilePosView === "menu"
+              ? "bg-amber-500 text-stone-950 shadow-md shadow-amber-500/20"
+              : "bg-stone-950 text-stone-400 border border-stone-800"
+          }`}
+        >
+          <UtensilsCrossed className="w-3.5 h-3.5" />
+          <span>Thực đơn ({filteredMenuItems.length})</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setMobilePosView("cart")}
+          className={`flex-1 py-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 relative ${
+            mobilePosView === "cart"
+              ? "bg-amber-500 text-stone-950 shadow-md shadow-amber-500/20"
+              : "bg-stone-950 text-stone-400 border border-stone-800"
+          }`}
+        >
+          <ShoppingCart className="w-3.5 h-3.5" />
+          <span>Giỏ & Bàn ({cartItemsCount + (currentSession?.totalItemsCount || 0)})</span>
+          {cartItemsCount > 0 && (
+            <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping absolute top-1.5 right-2" />
+          )}
+        </button>
+      </div>
+
       {/* Main Dual View Area */}
-      <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
+      <div className="flex-1 flex flex-col lg:flex-row overflow-hidden relative">
         {/* ============================================================== */}
         {/* LEFT COLUMN: Food Menu Grid & Search (65% width)               */}
         {/* ============================================================== */}
-        <section className="flex-1 flex flex-col border-r border-stone-800 bg-stone-950 overflow-hidden">
+        <section className={`flex-1 flex flex-col border-r border-stone-800 bg-stone-950 overflow-hidden ${
+          mobilePosView === "cart" ? "hidden lg:flex" : "flex"
+        }`}>
           {/* Categories & Search Bar */}
           <div className="p-3 border-b border-stone-800/80 bg-stone-900/40 flex flex-col sm:flex-row items-center gap-3">
             {/* Search Box */}
@@ -1128,7 +1184,9 @@ function PosContent() {
         {/* ============================================================== */}
         {/* RIGHT COLUMN: Live Cart & Session Tickets (35% width)         */}
         {/* ============================================================== */}
-        <aside className="w-full lg:w-[400px] xl:w-[440px] flex flex-col bg-stone-900/70 border-t lg:border-t-0 lg:border-l border-stone-800 shrink-0 overflow-hidden">
+        <aside className={`w-full lg:w-[400px] xl:w-[440px] flex flex-col bg-stone-900/70 border-t lg:border-t-0 lg:border-l border-stone-800 shrink-0 overflow-hidden ${
+          mobilePosView === "menu" ? "hidden lg:flex" : "flex flex-1"
+        }`}>
           {/* Cart Header Tabs */}
           <div className="p-2 border-b border-stone-800 bg-stone-900/90 flex items-center gap-2">
             <button
@@ -1449,6 +1507,28 @@ function PosContent() {
           )}
         </aside>
       </div>
+
+      {/* Floating Bottom Bar on Mobile when items are in cart */}
+      {mobilePosView === "menu" && cartItemsCount > 0 && (
+        <div className="lg:hidden fixed bottom-4 left-4 right-4 z-40 animate-in slide-in-from-bottom-4">
+          <button
+            type="button"
+            onClick={() => setMobilePosView("cart")}
+            className="w-full py-3 px-4 rounded-2xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-black text-sm flex items-center justify-between shadow-2xl shadow-amber-500/40 border border-amber-400/50 active:scale-[0.98] transition"
+          >
+            <div className="flex items-center gap-2.5">
+              <div className="w-7 h-7 rounded-full bg-stone-950 text-amber-400 text-xs flex items-center justify-center font-bold">
+                {cartItemsCount}
+              </div>
+              <span>Xem giỏ & Gửi Bếp</span>
+            </div>
+            <div className="flex items-center gap-1.5 font-mono text-sm">
+              <span>{cartTotal.toLocaleString("vi-VN")}đ</span>
+              <ArrowRight className="w-4 h-4" />
+            </div>
+          </button>
+        </div>
+      )}
 
       {/* ============================================================== */}
       {/* DRAWER: REALTIME NOTIFICATIONS (STT 95, 27, 28)                */}

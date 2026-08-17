@@ -10,6 +10,7 @@ import {
   StaffOrderLineRequest,
   TableSessionDetailDto,
 } from "@/shared/api/client";
+import { useOrderSignalR } from "@/shared/api/signalr";
 import {
   UtensilsCrossed,
   Search,
@@ -139,6 +140,44 @@ function QrOrderContent() {
       console.error(err);
     }
   };
+
+  // Realtime SignalR listener for customer
+  useOrderSignalR({
+    onOrderConfirmed: () => {
+      refreshSession();
+      setToastMsg({
+        type: "success",
+        text: "⚡ Nhân viên đã xác nhận đơn gọi món! Bếp đang tiến hành chế biến.",
+      });
+    },
+    onOrderRejected: (data) => {
+      refreshSession();
+      setToastMsg({
+        type: "error",
+        text: `✕ Đơn gọi món bị từ chối: ${data?.reason || "Món ăn tạm hết hoặc yêu cầu không hợp lệ."}`,
+      });
+    },
+    onOrderCreated: () => {
+      refreshSession();
+    },
+    onKitchenUpdated: () => {
+      refreshSession();
+    },
+    onSessionClosed: () => {
+      refreshSession();
+      setToastMsg({
+        type: "success",
+        text: "✓ Bàn ăn đã được thanh toán và đóng phiên phục vụ.",
+      });
+    },
+  });
+
+  // Backup sync every 6s for mobile browser background tabs
+  useEffect(() => {
+    if (!token) return;
+    const interval = setInterval(refreshSession, 6000);
+    return () => clearInterval(interval);
+  }, [token]);
 
   // Filtered Menu Items
   const filteredMenuItems = useMemo(() => {
@@ -846,7 +885,7 @@ function QrOrderContent() {
       {/* FLOATING CART BAR (Mobile-First Bottom Bar)                     */}
       {/* ============================================================== */}
       {cart.length > 0 && activeTab === "menu" && (
-        <div className="fixed bottom-4 inset-x-4 max-w-xl mx-auto z-40 animate-in slide-in-from-bottom duration-200">
+        <div className="fixed bottom-[calc(1rem+env(safe-area-inset-bottom,0px))] inset-x-3 sm:inset-x-4 max-w-xl mx-auto z-40 animate-in slide-in-from-bottom duration-200">
           <div
             onClick={() => setIsCartOpen(true)}
             className="bg-gradient-to-r from-amber-500 to-amber-600 text-stone-950 p-3.5 rounded-2xl shadow-2xl shadow-amber-500/30 flex items-center justify-between cursor-pointer active:scale-[0.99] transition-transform"
@@ -879,7 +918,7 @@ function QrOrderContent() {
       {/* ============================================================== */}
       {isCartOpen && (
         <div className="fixed inset-0 bg-black/80 z-50 flex items-end justify-center backdrop-blur-sm">
-          <div className="bg-stone-900 border-t border-stone-800 rounded-t-3xl w-full max-w-xl max-h-[85vh] flex flex-col overflow-hidden animate-in slide-in-from-bottom duration-300">
+          <div className="bg-stone-900 border-t border-stone-800 rounded-t-3xl w-full max-w-xl max-h-[92vh] flex flex-col overflow-hidden shadow-2xl animate-in slide-in-from-bottom duration-200 pb-safe">
             {/* Drawer Header */}
             <div className="p-4 border-b border-stone-800 flex items-center justify-between bg-stone-950/60">
               <div className="flex items-center gap-2">

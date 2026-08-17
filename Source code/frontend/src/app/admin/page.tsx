@@ -11,6 +11,7 @@ import {
   OrderTicketDto,
   TableNotificationDto,
 } from "@/shared/api/client";
+import { useOrderSignalR } from "@/shared/api/signalr";
 import {
   Users,
   Building2,
@@ -32,6 +33,7 @@ import {
   Store,
   Layers,
   Send,
+  CreditCard,
 } from "lucide-react";
 
 export default function AdminDashboardPage() {
@@ -52,7 +54,7 @@ export default function AdminDashboardPage() {
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
 
   // Active Tab for Live Center
-  const [activeTab, setActiveTab] = useState<"pendingQr" | "notifications" | "sessions">("pendingQr");
+  const [activeTab, setActiveTab] = useState<"pendingQr" | "billRequests" | "otherRequests" | "sessions">("pendingQr");
 
   const formatTime = (dateStr?: string, includeSeconds = false) => {
     if (!dateStr) return "";
@@ -113,14 +115,19 @@ export default function AdminDashboardPage() {
   useEffect(() => {
     if (!selectedBranchId) return;
     loadBranchData();
-
-    // Live polling every 3.5 seconds
-    const timer = setInterval(() => {
-      loadBranchData(true);
-    }, 3500);
-
-    return () => clearInterval(timer);
   }, [selectedBranchId, loadBranchData]);
+
+  // Real-time SignalR subscriptions
+  const { isConnected: isSignalRConnected } = useOrderSignalR({
+    onOrderPendingConfirm: () => loadBranchData(true),
+    onOrderConfirmed: () => loadBranchData(true),
+    onOrderRejected: () => loadBranchData(true),
+    onOrderCreated: () => loadBranchData(true),
+    onStaffCalled: () => loadBranchData(true),
+    onBillRequested: () => loadBranchData(true),
+    onNotificationDismissed: () => loadBranchData(true),
+    onSessionClosed: () => loadBranchData(true),
+  });
 
   // Confirm QR Ticket directly
   const handleConfirmQr = async (ticketId: string) => {
@@ -166,238 +173,204 @@ export default function AdminDashboardPage() {
     }
   };
 
-  // Calculated KPIs
+  // Calculated KPIs & Request Categorization
   const occupiedTables = useMemo(() => tables.filter((t) => t.status === "Occupied"), [tables]);
   const currentBranch = useMemo(() => branches.find((b) => b.id === selectedBranchId), [branches, selectedBranchId]);
 
+  const billNotifications = useMemo(() => {
+    return notifications.filter(
+      (n) =>
+        n.type === "RequestBill" ||
+        n.type === "BillRequested" ||
+        n.message?.toLowerCase().includes("thanh toán") ||
+        n.message?.toLowerCase().includes("bill") ||
+        n.message?.toLowerCase().includes("hóa đơn") ||
+        n.message?.toLowerCase().includes("tính tiền")
+    );
+  }, [notifications]);
+
+  const otherNotifications = useMemo(() => {
+    return notifications.filter(
+      (n) =>
+        !(
+          n.type === "RequestBill" ||
+          n.type === "BillRequested" ||
+          n.message?.toLowerCase().includes("thanh toán") ||
+          n.message?.toLowerCase().includes("bill") ||
+          n.message?.toLowerCase().includes("hóa đơn") ||
+          n.message?.toLowerCase().includes("tính tiền")
+        )
+    );
+  }, [notifications]);
+
   return (
-    <div className="space-y-6 animate-in fade-in duration-200">
-      {/* Top Banner & Branch Scope Selector */}
-      <div className="p-6 rounded-3xl bg-gradient-to-r from-stone-900 via-stone-900 to-amber-950/40 border border-stone-800 relative overflow-hidden shadow-2xl">
-        <div className="absolute top-0 right-0 w-96 h-96 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
-
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="flex flex-wrap items-center gap-2 mb-2">
-              <span
-                className={`text-xs font-bold px-2.5 py-0.5 rounded-full border ${
-                  roleStyle?.badgeBg || "bg-stone-800"
-                } ${roleStyle?.badgeText || "text-stone-300"} ${
-                  roleStyle?.badgeBorder || "border-stone-700"
-                }`}
-              >
-                Cấp {user?.roleLevel} · {user?.roleDisplayName}
-              </span>
-              <span className="text-xs text-stone-400">
-                Phạm vi: <strong className="text-amber-400">{currentBranch?.name || "Toàn chuỗi"}</strong>
-              </span>
-              {user?.assignedAreaNames && user.assignedAreaNames.length > 0 && (
-                <div className="flex items-center gap-1">
-                  <span className="text-[11px] text-stone-400">Vùng của bạn:</span>
-                  {user.assignedAreaNames.map((aName, i) => (
-                    <span
-                      key={i}
-                      className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] font-black"
-                    >
-                      {aName}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <h1 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">
-              Trung tâm Điều hành & Giám sát Bàn ăn
-            </h1>
-            <p className="mt-1 text-stone-300 text-xs sm:text-sm">
-              Theo dõi trực tiếp toàn bộ đơn đặt món từ khách QR, yêu cầu hỗ trợ và trạng thái phục vụ tại chi nhánh.
-            </p>
-          </div>
-
-          {/* Branch Selector (if multi-branch access) */}
-          <div className="flex items-center gap-2.5 shrink-0">
-            {branches.length > 1 && user && user.roleLevel <= 2 && (
-              <div className="flex items-center gap-2 bg-stone-950/80 p-2 rounded-2xl border border-stone-800">
-                <Store className="w-4 h-4 text-amber-400" />
-                <select
-                  value={selectedBranchId}
-                  onChange={(e) => setSelectedBranchId(e.target.value)}
-                  className="bg-transparent text-xs font-bold text-white focus:outline-none cursor-pointer"
+    <div className="space-y-4 animate-in fade-in duration-200">
+      {/* Compact Top Header & Actions */}
+      <div className="flex items-center justify-between gap-2 border-b border-stone-800/80 pb-3">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-xs text-stone-300 font-bold truncate">
+            {currentBranch?.name || "Toàn chuỗi"}
+          </span>
+          {user?.assignedAreaNames && user.assignedAreaNames.length > 0 && (
+            <div className="hidden sm:flex items-center gap-1 shrink-0">
+              <span className="text-[11px] text-stone-500">• Vùng:</span>
+              {user.assignedAreaNames.map((aName, i) => (
+                <span
+                  key={i}
+                  className="px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-300 border border-amber-500/20 text-[10px] font-bold"
                 >
-                  {branches.map((b) => (
-                    <option key={b.id} value={b.id} className="bg-stone-950 text-stone-200">
-                      {b.name} ({b.code})
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
+                  {aName}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
 
-            <button
-              onClick={() => loadBranchData()}
-              disabled={loading}
-              className="p-2.5 rounded-xl bg-stone-900 border border-stone-800 hover:bg-stone-800 text-stone-300 transition"
-              title="Làm mới dữ liệu realtime"
-            >
-              <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-            </button>
+        <div className="flex items-center gap-2 shrink-0">
+          {branches.length > 1 && user && user.roleLevel <= 2 && (
+            <div className="flex items-center gap-1.5 bg-stone-900 px-2.5 py-1.5 rounded-xl border border-stone-800 text-xs">
+              <Store className="w-3.5 h-3.5 text-amber-400" />
+              <select
+                value={selectedBranchId}
+                onChange={(e) => setSelectedBranchId(e.target.value)}
+                className="bg-transparent text-xs font-bold text-stone-200 focus:outline-none cursor-pointer"
+              >
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id} className="bg-stone-950 text-stone-200">
+                    {b.name} ({b.code})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
-            <Link
-              href="/admin/pos"
-              className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-stone-950 font-bold rounded-xl shadow-lg shadow-amber-500/20 text-xs transition active:scale-[0.99]"
-            >
-              <UtensilsCrossed className="w-4 h-4" />
-              <span>Mở Màn hình POS</span>
-              <ArrowRight className="w-3.5 h-3.5" />
-            </Link>
-          </div>
+          <button
+            onClick={() => loadBranchData()}
+            disabled={loading}
+            className="p-2 rounded-xl bg-stone-900 border border-stone-800 hover:bg-stone-800 text-stone-300 transition"
+            title="Làm mới dữ liệu realtime"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+          </button>
+
+          <Link
+            href="/admin/pos"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold rounded-xl shadow-md text-xs transition active:scale-[0.98]"
+          >
+            <UtensilsCrossed className="w-3.5 h-3.5" />
+            <span>Màn hình POS</span>
+            <ArrowRight className="w-3.5 h-3.5 hidden sm:inline" />
+          </Link>
         </div>
       </div>
 
-      {/* KPI Realtime Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
-        {/* Card 1: Pending QR Orders */}
-        <div
+      {/* Unified Live Operational Segmented Tabs */}
+      <div className="bg-stone-900/90 border border-stone-800 p-1.5 rounded-2xl flex items-center gap-1.5 overflow-x-auto no-scrollbar shadow-lg">
+        {/* Tab 1: Đơn gọi món */}
+        <button
+          type="button"
           onClick={() => setActiveTab("pendingQr")}
-          className={`p-4 rounded-2xl border transition-all cursor-pointer select-none ${
-            pendingQrTickets.length > 0
-              ? "bg-amber-500/10 border-amber-500/50 shadow-lg shadow-amber-500/10"
-              : "bg-stone-900/70 border-stone-800"
+          className={`flex-1 min-w-[135px] py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+            activeTab === "pendingQr"
+              ? "bg-amber-500 text-stone-950 shadow-md shadow-amber-500/20"
+              : "text-stone-400 hover:text-stone-200 hover:bg-stone-800/60"
           }`}
         >
-          <div className="flex items-center justify-between text-xs text-stone-400">
-            <span className="font-semibold">Đơn QR chờ duyệt</span>
-            <span className="relative flex h-2.5 w-2.5">
-              {pendingQrTickets.length > 0 && (
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-              )}
-              <span
-                className={`relative inline-flex rounded-full h-2.5 w-2.5 ${
-                  pendingQrTickets.length > 0 ? "bg-amber-400" : "bg-stone-600"
-                }`}
-              ></span>
-            </span>
-          </div>
-          <div className="mt-2 text-2xl font-black text-white flex items-baseline gap-2">
-            <span>{pendingQrTickets.length}</span>
-            <span className="text-xs font-normal text-stone-400">đợt gọi món</span>
-          </div>
-          <div className="mt-1 text-[11px] text-amber-400 font-medium">
-            {pendingQrTickets.length > 0 ? "⚡ Cần xác nhận gửi bếp ngay" : "Không có đơn chờ"}
-          </div>
-        </div>
+          <span className="flex items-center gap-1.5">
+            <span>⚡</span>
+            <span>Đơn Gọi Món</span>
+          </span>
+          <span
+            className={`px-2 py-0.5 rounded-full text-[11px] font-black ${
+              activeTab === "pendingQr"
+                ? "bg-stone-950 text-amber-400"
+                : pendingQrTickets.length > 0
+                ? "bg-amber-500 text-stone-950 animate-pulse"
+                : "bg-stone-800 text-stone-400"
+            }`}
+          >
+            {pendingQrTickets.length}
+          </span>
+        </button>
 
-        {/* Card 2: Table Notifications */}
-        <div
-          onClick={() => setActiveTab("notifications")}
-          className={`p-4 rounded-2xl border transition-all cursor-pointer select-none ${
-            notifications.length > 0
-              ? "bg-rose-500/10 border-rose-500/50 shadow-lg shadow-rose-500/10"
-              : "bg-stone-900/70 border-stone-800"
+        {/* Tab 2: Gọi thanh toán */}
+        <button
+          type="button"
+          onClick={() => setActiveTab("billRequests")}
+          className={`flex-1 min-w-[135px] py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+            activeTab === "billRequests"
+              ? "bg-purple-600 text-white shadow-md shadow-purple-600/20"
+              : "text-stone-400 hover:text-stone-200 hover:bg-stone-800/60"
           }`}
         >
-          <div className="flex items-center justify-between text-xs text-stone-400">
-            <span className="font-semibold">Yêu cầu từ bàn</span>
-            <Bell className={`w-4 h-4 ${notifications.length > 0 ? "text-rose-400 animate-bounce" : "text-stone-500"}`} />
-          </div>
-          <div className="mt-2 text-2xl font-black text-white flex items-baseline gap-2">
-            <span>{notifications.length}</span>
-            <span className="text-xs font-normal text-stone-400">yêu cầu</span>
-          </div>
-          <div className="mt-1 text-[11px] text-rose-400 font-medium">
-            {notifications.length > 0 ? "Gọi nhân viên / Xin bill" : "Mọi bàn đã phục vụ tốt"}
-          </div>
-        </div>
+          <CreditCard className="w-3.5 h-3.5" />
+          <span>Gọi Thanh Toán</span>
+          <span
+            className={`px-2 py-0.5 rounded-full text-[11px] font-black ${
+              activeTab === "billRequests"
+                ? "bg-white text-purple-700"
+                : billNotifications.length > 0
+                ? "bg-purple-500 text-white animate-pulse"
+                : "bg-stone-800 text-stone-400"
+            }`}
+          >
+            {billNotifications.length}
+          </span>
+        </button>
 
-        {/* Card 3: Occupied Tables */}
-        <div
+        {/* Tab 3: Yêu cầu khác */}
+        <button
+          type="button"
+          onClick={() => setActiveTab("otherRequests")}
+          className={`flex-1 min-w-[135px] py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+            activeTab === "otherRequests"
+              ? "bg-rose-600 text-white shadow-md shadow-rose-600/20"
+              : "text-stone-400 hover:text-stone-200 hover:bg-stone-800/60"
+          }`}
+        >
+          <Bell className="w-3.5 h-3.5" />
+          <span>Yêu Cầu Khác</span>
+          <span
+            className={`px-2 py-0.5 rounded-full text-[11px] font-black ${
+              activeTab === "otherRequests"
+                ? "bg-white text-rose-700"
+                : otherNotifications.length > 0
+                ? "bg-rose-500 text-white animate-pulse"
+                : "bg-stone-800 text-stone-400"
+            }`}
+          >
+            {otherNotifications.length}
+          </span>
+        </button>
+
+        {/* Tab 4: Bàn phục vụ */}
+        <button
+          type="button"
           onClick={() => setActiveTab("sessions")}
-          className="p-4 rounded-2xl bg-stone-900/70 border border-stone-800 transition cursor-pointer select-none"
+          className={`flex-1 min-w-[135px] py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+            activeTab === "sessions"
+              ? "bg-emerald-600 text-white shadow-md shadow-emerald-600/20"
+              : "text-stone-400 hover:text-stone-200 hover:bg-stone-800/60"
+          }`}
         >
-          <div className="flex items-center justify-between text-xs text-stone-400">
-            <span className="font-semibold">Bàn đang phục vụ</span>
-            <Users className="w-4 h-4 text-emerald-400" />
-          </div>
-          <div className="mt-2 text-2xl font-black text-white flex items-baseline gap-2">
-            <span>{occupiedTables.length}</span>
-            <span className="text-xs font-normal text-stone-400">/ {tables.length} bàn</span>
-          </div>
-          <div className="mt-1 text-[11px] text-emerald-400 font-medium">
-            {activeSessions.length} phiên bàn đang mở
-          </div>
-        </div>
-
-        {/* Card 4: Quick KDS Link */}
-        <Link
-          href="/kds"
-          className="p-4 rounded-2xl bg-stone-900/70 hover:bg-stone-850 border border-stone-800 hover:border-amber-500/40 transition group"
-        >
-          <div className="flex items-center justify-between text-xs text-stone-400">
-            <span className="font-semibold">Màn hình Bếp KDS</span>
-            <Flame className="w-4 h-4 text-amber-500 group-hover:scale-110 transition-transform" />
-          </div>
-          <div className="mt-2 text-base font-bold text-white flex items-center justify-between">
-            <span>Bếp & Quầy Bar</span>
-            <ArrowRight className="w-4 h-4 text-amber-400 group-hover:translate-x-1 transition-transform" />
-          </div>
-          <div className="mt-1 text-[11px] text-stone-400">Điều phối chế biến trực tiếp</div>
-        </Link>
+          <Users className="w-3.5 h-3.5" />
+          <span>Bàn Phục Vụ</span>
+          <span
+            className={`px-2 py-0.5 rounded-full text-[11px] font-black ${
+              activeTab === "sessions"
+                ? "bg-white text-emerald-700"
+                : "bg-stone-800 text-stone-400"
+            }`}
+          >
+            {occupiedTables.length}/{tables.length}
+          </span>
+        </button>
       </div>
 
       {/* Main Live Operations Board */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Column (2 Cols): Live Requests & Orders Center */}
         <div className="lg:col-span-2 space-y-4">
-          {/* Navigation Tabs */}
-          <div className="flex items-center justify-between border-b border-stone-800 pb-2">
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setActiveTab("pendingQr")}
-                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
-                  activeTab === "pendingQr"
-                    ? "bg-amber-500 text-stone-950 shadow-md shadow-amber-500/20"
-                    : "bg-stone-900 text-stone-400 hover:text-stone-200 border border-stone-800"
-                }`}
-              >
-                <span>⚡ Đơn QR Chờ Duyệt</span>
-                {pendingQrTickets.length > 0 && (
-                  <span className="px-1.5 py-0.2 rounded-full bg-stone-950 text-amber-400 text-[10px] font-black">
-                    {pendingQrTickets.length}
-                  </span>
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setActiveTab("notifications")}
-                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
-                  activeTab === "notifications"
-                    ? "bg-rose-500 text-white shadow-md shadow-rose-500/20"
-                    : "bg-stone-900 text-stone-400 hover:text-stone-200 border border-stone-800"
-                }`}
-              >
-                <span>🛎️ Yêu Cầu Từ Bàn</span>
-                {notifications.length > 0 && (
-                  <span className="px-1.5 py-0.2 rounded-full bg-stone-950 text-rose-300 text-[10px] font-black">
-                    {notifications.length}
-                  </span>
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setActiveTab("sessions")}
-                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
-                  activeTab === "sessions"
-                    ? "bg-emerald-600 text-white shadow-md shadow-emerald-600/20"
-                    : "bg-stone-900 text-stone-400 hover:text-stone-200 border border-stone-800"
-                }`}
-              >
-                <span>📋 Bàn Đang Phục Vụ ({activeSessions.length})</span>
-              </button>
-            </div>
-          </div>
 
           {/* TAB 1: PENDING QR ORDERS */}
           {activeTab === "pendingQr" && (
@@ -518,11 +491,76 @@ export default function AdminDashboardPage() {
             </div>
           )}
 
-          {/* TAB 2: TABLE NOTIFICATIONS */}
-          {activeTab === "notifications" && (
+          {/* TAB 2: BILL REQUESTS (GỌI THANH TOÁN) */}
+          {activeTab === "billRequests" && (
             <div className="space-y-3">
-              {notifications.length > 0 ? (
-                notifications.map((n) => (
+              {billNotifications.length > 0 ? (
+                billNotifications.map((n) => {
+                  const session = activeSessions.find((s) => s.tableId === n.tableId);
+                  return (
+                    <div
+                      key={n.id}
+                      className="p-4 rounded-2xl bg-stone-900/90 border border-purple-500/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-lg"
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-purple-400 shrink-0 mt-0.5">
+                          <CreditCard className="w-5 h-5 animate-pulse" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-white text-sm">
+                              {n.tableName || n.tableCode} ({n.areaName || "Khu vực"})
+                            </span>
+                            <span className="text-[10px] font-mono text-stone-400">
+                              {formatTime(n.createdAt, true)}
+                            </span>
+                          </div>
+                          <p className="text-purple-300 text-xs mt-0.5 font-medium">{n.message}</p>
+                          {session && (
+                            <p className="text-[11px] text-stone-400 mt-1 font-mono">
+                              Tạm tính: <strong className="text-emerald-400 font-bold">{session.totalAmount.toLocaleString("vi-VN")}đ</strong> ({session.totalItemsCount || 0} món)
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <Link
+                          href={`/admin/pos?tableId=${n.tableId}`}
+                          className="px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-purple-600/20"
+                        >
+                          <Receipt className="w-3.5 h-3.5" />
+                          <span>Thu Ngân POS & In Bill</span>
+                        </Link>
+                        <button
+                          type="button"
+                          onClick={() => handleDismissNotif(n.id)}
+                          disabled={actionLoadingId === n.id}
+                          className="px-3 py-2 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-300 text-xs font-semibold transition"
+                        >
+                          ✓ Đã hoàn tất
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="p-8 rounded-2xl bg-stone-900/40 border border-stone-800/80 text-center space-y-2">
+                  <CheckCircle2 className="w-10 h-10 text-purple-400 mx-auto stroke-[1.5]" />
+                  <h3 className="text-sm font-bold text-stone-200">Không có yêu cầu thanh toán nào</h3>
+                  <p className="text-xs text-stone-400">
+                    Khi khách bấm "Yêu cầu thanh toán / Xin hóa đơn" tại bàn, thông báo sẽ đổ về đây để thu ngân xử lý.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB 3: OTHER CUSTOMER REQUESTS (YÊU CẦU KHÁC TỪ KHÁCH HÀNG) */}
+          {activeTab === "otherRequests" && (
+            <div className="space-y-3">
+              {otherNotifications.length > 0 ? (
+                otherNotifications.map((n) => (
                   <div
                     key={n.id}
                     className="p-4 rounded-2xl bg-stone-900/90 border border-rose-500/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-lg"
@@ -555,7 +593,7 @@ export default function AdminDashboardPage() {
                         type="button"
                         onClick={() => handleDismissNotif(n.id)}
                         disabled={actionLoadingId === n.id}
-                        className="px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-stone-950 text-xs font-bold transition shadow-sm"
+                        className="px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-stone-950 text-xs font-bold transition shadow-sm"
                       >
                         ✓ Đã xử lý xong
                       </button>
@@ -565,9 +603,9 @@ export default function AdminDashboardPage() {
               ) : (
                 <div className="p-8 rounded-2xl bg-stone-900/40 border border-stone-800/80 text-center space-y-2">
                   <CheckCircle2 className="w-10 h-10 text-emerald-400 mx-auto stroke-[1.5]" />
-                  <h3 className="text-sm font-bold text-stone-200">Không có yêu cầu phục vụ nào đang chờ</h3>
+                  <h3 className="text-sm font-bold text-stone-200">Không có yêu cầu hỗ trợ nào đang chờ</h3>
                   <p className="text-xs text-stone-400">
-                    Khi khách gọi nhân viên (lấy đá, khăn lạnh...) hoặc xin hóa đơn, thông báo sẽ lập tức đổ về đây.
+                    Khi khách gọi nhân viên (lấy thêm đá, khăn lạnh, chén dĩa...), yêu cầu sẽ lập tức đổ về đây.
                   </p>
                 </div>
               )}
