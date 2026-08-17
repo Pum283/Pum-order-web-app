@@ -29,3 +29,15 @@ public class DiningTable : EntityBase
     // Navigation
     public virtual Area? Area { get; set; }
 }
+
+public class StaffAreaAssignment : EntityBase
+{
+    public Guid BranchId { get; set; }
+    public Guid UserId { get; set; }
+    public Guid AreaId { get; set; }
+    public bool IsActive { get; set; } = true;
+    public DateTime AssignedAt { get; set; } = DateTime.UtcNow;
+
+    // Navigation
+    public virtual Area? Area { get; set; }
+}

@@ -10,6 +10,8 @@ public class TableSession : EntityBase
     public string SessionCode { get; set; } = string.Empty;
     public int GuestCount { get; set; } = 1;
     public Guid? OpenedByUserId { get; set; }
+    public string? CustomerName { get; set; }
+    public string? CustomerPhone { get; set; }
     public TableSessionStatus Status { get; set; } = TableSessionStatus.Open;
     public DateTime OpenedAt { get; set; } = DateTime.UtcNow;
     public DateTime? ClosedAt { get; set; }
@@ -21,6 +23,8 @@ public class OrderTicket : EntityBase
     public int TicketNumber { get; set; } = 1;
     public OrderSource Source { get; set; } = OrderSource.StaffAssisted;
     public Guid? CreatedByUserId { get; set; }
+    public string? CustomerName { get; set; }
+    public string? CustomerPhone { get; set; }
     public string? Note { get; set; }
     public DateTime OrderedAt { get; set; } = DateTime.UtcNow;
 }

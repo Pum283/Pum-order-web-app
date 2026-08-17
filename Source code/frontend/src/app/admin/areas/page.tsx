@@ -6,6 +6,7 @@ import {
   api,
   BranchDto,
   AreaDto,
+  UserDto,
   CreateAreaRequest,
   UpdateAreaRequest,
 } from "@/shared/api/client";
@@ -23,6 +24,7 @@ import {
   Search,
   ArrowRight,
   Sparkles,
+  Users,
 } from "lucide-react";
 
 export default function AreasManagementPage() {
@@ -31,6 +33,7 @@ export default function AreasManagementPage() {
   const [userRoleLevel, setUserRoleLevel] = useState<number>(5);
 
   const [areas, setAreas] = useState<AreaDto[]>([]);
+  const [staffList, setStaffList] = useState<UserDto[]>([]);
   const [searchKeyword, setSearchKeyword] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
@@ -85,8 +88,12 @@ export default function AreasManagementPage() {
     setLoading(true);
     setErrorMsg(null);
     try {
-      const res = await api.getAreas(selectedBranchId);
+      const [res, usersData] = await Promise.all([
+        api.getAreas(selectedBranchId),
+        api.getUsers({ branchId: selectedBranchId, pageSize: 100 }).catch(() => ({ items: [] })),
+      ]);
       setAreas(res);
+      setStaffList(usersData.items || []);
     } catch (err: unknown) {
       const error = err as { message?: string };
       setErrorMsg(error.message || "Không thể tải danh sách khu vực.");
@@ -388,6 +395,43 @@ export default function AreasManagementPage() {
                 <div className="p-3 rounded-xl bg-stone-950/60 border border-stone-800/80 my-3 flex items-center justify-between text-xs">
                   <div className="text-stone-400">Số lượng bàn trực thuộc:</div>
                   <div className="font-black text-amber-400 text-sm">{area.tableCount} bàn</div>
+                </div>
+
+                {/* Assigned Staff */}
+                <div className="space-y-1.5 mb-3">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="text-stone-400 font-medium flex items-center gap-1">
+                      <Users className="w-3 h-3 text-amber-400" />
+                      <span>Nhân viên phụ trách:</span>
+                    </span>
+                    <Link
+                      href="/admin/users"
+                      className="text-[10px] text-amber-400 hover:text-amber-300 font-semibold"
+                    >
+                      Phân công →
+                    </Link>
+                  </div>
+                  {(() => {
+                    const assignedStaff = staffList.filter(
+                      (u) => u.assignedAreaIds && u.assignedAreaIds.includes(area.id)
+                    );
+                    return assignedStaff.length > 0 ? (
+                      <div className="flex flex-wrap gap-1">
+                        {assignedStaff.map((u) => (
+                          <span
+                            key={u.id}
+                            className="px-2 py-0.5 rounded-md bg-stone-800 border border-stone-700 text-amber-300 text-[10px] font-semibold"
+                          >
+                            {u.displayName}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="text-[10px] text-stone-500 italic block">
+                        Chưa phân công cụ thể (Mọi NV trong chi nhánh đều phục vụ)
+                      </span>
+                    );
+                  })()}
                 </div>
               </div>
 

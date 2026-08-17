@@ -28,6 +28,8 @@ public class StaffOrderLineRequest
 public class StaffPlaceOrderRequest
 {
     public Guid SessionId { get; set; }
+    public string? CustomerName { get; set; }
+    public string? CustomerPhone { get; set; }
     public string? Note { get; set; }
     public List<StaffOrderLineRequest> Lines { get; set; } = [];
 }
@@ -35,6 +37,8 @@ public class StaffPlaceOrderRequest
 public class QrPlaceOrderRequest
 {
     public string TableQrToken { get; set; } = string.Empty;
+    public string? CustomerName { get; set; }
+    public string? CustomerPhone { get; set; }
     public string? Note { get; set; }
     public List<StaffOrderLineRequest> Lines { get; set; } = [];
 }
@@ -61,6 +65,8 @@ public class OrderTicketDto
     public Guid SessionId { get; set; }
     public int TicketNumber { get; set; }
     public string Source { get; set; } = "StaffAssisted"; // StaffAssisted, CustomerQr
+    public string? CustomerName { get; set; }
+    public string? CustomerPhone { get; set; }
     public string? CreatedByUserName { get; set; }
     public string? Note { get; set; }
     public DateTime OrderedAt { get; set; }
@@ -78,6 +84,8 @@ public class TableSessionDetailDto
     public string TableName { get; set; } = string.Empty;
     public string AreaName { get; set; } = string.Empty;
     public string SessionCode { get; set; } = string.Empty;
+    public string? CustomerName { get; set; }
+    public string? CustomerPhone { get; set; }
     public int GuestCount { get; set; } = 1;
     public string Status { get; set; } = "Open";
     public DateTime OpenedAt { get; set; }

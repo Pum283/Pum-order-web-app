@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using OrderPum.Application.DTOs.Auth;
 using OrderPum.Application.Interfaces.Services.Auth;
 using OrderPum.Domain.Entities.Auth;
+using OrderPum.Domain.Entities.Floor;
 using OrderPum.Domain.Enums.Auth;
 using OrderPum.Infrastructure.Persistence;
 using OrderPum.Infrastructure.Security;
@@ -37,6 +38,7 @@ public class AuthService(AppDbContext db, IJwtTokenService jwt) : IAuthService
         }
 
         var (roleId, roleCode, roleLevel, roleDisplayName) = ResolveRoleInfo(user);
+        var (areaIds, areaNames) = await GetUserAreaInfoAsync(user.Id, ct);
 
         return new LoginResponse(
             jwt.CreateToken(user.Id, user.DisplayName, user.Role, user.BranchId),
@@ -48,7 +50,9 @@ public class AuthService(AppDbContext db, IJwtTokenService jwt) : IAuthService
             roleLevel,
             roleDisplayName,
             user.BranchId,
-            branchName
+            branchName,
+            areaIds,
+            areaNames
         );
     }
 
@@ -84,6 +88,7 @@ public class AuthService(AppDbContext db, IJwtTokenService jwt) : IAuthService
         }
 
         var (roleId, roleCode, roleLevel, roleDisplayName) = ResolveRoleInfo(user);
+        var (areaIds, areaNames) = await GetUserAreaInfoAsync(user.Id, ct);
 
         return new LoginResponse(
             jwt.CreateToken(user.Id, user.DisplayName, user.Role, user.BranchId),
@@ -95,7 +100,9 @@ public class AuthService(AppDbContext db, IJwtTokenService jwt) : IAuthService
             roleLevel,
             roleDisplayName,
             user.BranchId,
-            branchName
+            branchName,
+            areaIds,
+            areaNames
         );
     }
 
@@ -115,7 +122,8 @@ public class AuthService(AppDbContext db, IJwtTokenService jwt) : IAuthService
                 .FirstOrDefaultAsync(ct);
         }
 
-        return MapToDto(user, branchName);
+        var (areaIds, areaNames) = await GetUserAreaInfoAsync(user.Id, ct);
+        return MapToDto(user, branchName, areaIds, areaNames);
     }
 
     public async Task ChangePasswordAsync(Guid currentUserId, ChangePasswordRequest request, CancellationToken ct = default)
@@ -225,7 +233,33 @@ public class AuthService(AppDbContext db, IJwtTokenService jwt) : IAuthService
             .Where(b => branchIds.Contains(b.Id))
             .ToDictionaryAsync(b => b.Id, b => b.Name, ct);
 
-        var items = users.Select(u => MapToDto(u, u.BranchId.HasValue && branches.TryGetValue(u.BranchId.Value, out var bn) ? bn : null)).ToList();
+        // Lấy thông tin Staff Area Assignments theo batch
+        var userIds = users.Select(u => u.Id).ToList();
+        var assignments = await db.StaffAreaAssignments
+            .Where(a => userIds.Contains(a.UserId) && a.IsActive && !a.IsDeleted)
+            .ToListAsync(ct);
+
+        var allAreaIds = assignments.Select(a => a.AreaId).Distinct().ToList();
+        var areasDict = await db.Areas
+            .Where(a => allAreaIds.Contains(a.Id))
+            .ToDictionaryAsync(a => a.Id, a => a.Name, ct);
+
+        var userAreaMap = assignments
+            .GroupBy(a => a.UserId)
+            .ToDictionary(
+                g => g.Key,
+                g => (
+                    Ids: g.Select(x => x.AreaId).ToList(),
+                    Names: g.Select(x => areasDict.TryGetValue(x.AreaId, out var name) ? name : "").Where(n => !string.IsNullOrEmpty(n)).ToList()
+                )
+            );
+
+        var items = users.Select(u =>
+        {
+            var bName = u.BranchId.HasValue && branches.TryGetValue(u.BranchId.Value, out var bn) ? bn : null;
+            var assigned = userAreaMap.TryGetValue(u.Id, out var aInfo) ? aInfo : (Ids: new List<Guid>(), Names: new List<string>());
+            return MapToDto(u, bName, assigned.Ids, assigned.Names);
+        }).ToList();
 
         return new PagedResult<UserDto>(items, totalCount, page, pageSize, totalPages);
     }
@@ -246,7 +280,8 @@ public class AuthService(AppDbContext db, IJwtTokenService jwt) : IAuthService
                 .FirstOrDefaultAsync(ct);
         }
 
-        return MapToDto(user, branchName);
+        var (areaIds, areaNames) = await GetUserAreaInfoAsync(user.Id, ct);
+        return MapToDto(user, branchName, areaIds, areaNames);
     }
 
     public async Task<UserDto> CreateUserAsync(
@@ -328,6 +363,25 @@ public class AuthService(AppDbContext db, IJwtTokenService jwt) : IAuthService
         db.Users.Add(entity);
         await db.SaveChangesAsync(ct);
 
+        // Lưu phân công khu vực nếu có
+        if (request.AssignedAreaIds != null && request.AssignedAreaIds.Count > 0 && branchId.HasValue)
+        {
+            foreach (var areaId in request.AssignedAreaIds)
+            {
+                db.StaffAreaAssignments.Add(new StaffAreaAssignment
+                {
+                    Id = Guid.NewGuid(),
+                    BranchId = branchId.Value,
+                    UserId = entity.Id,
+                    AreaId = areaId,
+                    IsActive = true,
+                    AssignedAt = DateTime.UtcNow,
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
+            await db.SaveChangesAsync(ct);
+        }
+
         entity.RoleRef = targetRole;
 
         string? branchName = null;
@@ -339,7 +393,8 @@ public class AuthService(AppDbContext db, IJwtTokenService jwt) : IAuthService
                 .FirstOrDefaultAsync(ct);
         }
 
-        return MapToDto(entity, branchName);
+        var (areaIds, areaNames) = await GetUserAreaInfoAsync(entity.Id, ct);
+        return MapToDto(entity, branchName, areaIds, areaNames);
     }
 
     public async Task<UserDto> UpdateUserAsync(
@@ -469,6 +524,72 @@ public class AuthService(AppDbContext db, IJwtTokenService jwt) : IAuthService
         return user.IsLocked;
     }
 
+    public async Task<UserDto> AssignStaffAreasAsync(
+        Guid userId,
+        List<Guid> areaIds,
+        int currentRoleLevel,
+        Guid? currentBranchId,
+        CancellationToken ct = default)
+    {
+        var user = await db.Users
+            .Include(x => x.RoleRef)
+            .FirstOrDefaultAsync(x => x.Id == userId && !x.IsDeleted, ct)
+            ?? throw new InvalidOperationException("Không tìm thấy nhân viên.");
+
+        if (currentRoleLevel == 3 && user.BranchId != currentBranchId)
+            throw new InvalidOperationException("Bạn chỉ được phép phân công nhân viên thuộc chi nhánh của mình.");
+
+        var existingAssignments = await db.StaffAreaAssignments
+            .Where(x => x.UserId == userId && !x.IsDeleted)
+            .ToListAsync(ct);
+        db.StaffAreaAssignments.RemoveRange(existingAssignments);
+
+        var effectiveBranchId = user.BranchId ?? currentBranchId ?? Guid.Empty;
+        if (areaIds != null && areaIds.Count > 0)
+        {
+            foreach (var areaId in areaIds)
+            {
+                db.StaffAreaAssignments.Add(new StaffAreaAssignment
+                {
+                    Id = Guid.NewGuid(),
+                    BranchId = effectiveBranchId,
+                    UserId = userId,
+                    AreaId = areaId,
+                    IsActive = true,
+                    AssignedAt = DateTime.UtcNow,
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
+        }
+        await db.SaveChangesAsync(ct);
+
+        return await GetUserByIdAsync(userId, ct);
+    }
+
+    public async Task<List<Guid>> GetStaffAssignedAreaIdsAsync(Guid userId, CancellationToken ct = default)
+    {
+        return await db.StaffAreaAssignments
+            .Where(x => x.UserId == userId && x.IsActive && !x.IsDeleted)
+            .Select(x => x.AreaId)
+            .ToListAsync(ct);
+    }
+
+    private async Task<(List<Guid> Ids, List<string> Names)> GetUserAreaInfoAsync(Guid userId, CancellationToken ct)
+    {
+        var assignments = await db.StaffAreaAssignments
+            .Where(a => a.UserId == userId && a.IsActive && !a.IsDeleted)
+            .ToListAsync(ct);
+
+        var areaIds = assignments.Select(a => a.AreaId).ToList();
+        var areaNames = await db.Areas
+            .Where(a => areaIds.Contains(a.Id))
+            .OrderBy(a => a.SortOrder)
+            .Select(a => a.Name)
+            .ToListAsync(ct);
+
+        return (areaIds, areaNames);
+    }
+
     public async Task<bool> DeleteUserAsync(
         Guid id,
         Guid currentUserId,
@@ -522,7 +643,7 @@ public class AuthService(AppDbContext db, IJwtTokenService jwt) : IAuthService
         );
     }
 
-    private static UserDto MapToDto(UserAccount u, string? branchName)
+    private static UserDto MapToDto(UserAccount u, string? branchName, List<Guid>? assignedAreaIds = null, List<string>? assignedAreaNames = null)
     {
         var (roleId, roleCode, roleLevel, roleDisplayName) = ResolveRoleInfo(u);
 
@@ -536,6 +657,8 @@ public class AuthService(AppDbContext db, IJwtTokenService jwt) : IAuthService
             roleDisplayName,
             u.BranchId,
             branchName,
+            assignedAreaIds ?? new List<Guid>(),
+            assignedAreaNames ?? new List<string>(),
             !string.IsNullOrEmpty(u.PinHash),
             u.IsLocked,
             u.CreatedAt,

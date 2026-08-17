@@ -188,4 +188,20 @@ public class OrdersController(IOrderService orders, IHubContext<OrderHub> hub) :
         await hub.Clients.All.SendAsync("notification.dismissed", notificationId, ct);
         return NoContent();
     }
+
+    [HttpGet("pending-qr")]
+    [Authorize]
+    public async Task<ActionResult<List<OrderTicketDto>>> GetPendingQrTickets([FromQuery] Guid branchId, CancellationToken ct)
+    {
+        var list = await orders.GetPendingQrTicketsAsync(branchId, ct);
+        return Ok(list);
+    }
+
+    [HttpGet("sessions/active")]
+    [Authorize]
+    public async Task<ActionResult<List<TableSessionDetailDto>>> GetActiveSessions([FromQuery] Guid branchId, CancellationToken ct)
+    {
+        var list = await orders.GetActiveSessionsAsync(branchId, ct);
+        return Ok(list);
+    }
 }

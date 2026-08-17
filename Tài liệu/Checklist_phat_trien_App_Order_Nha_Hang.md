@@ -98,54 +98,54 @@ _Hạ tầng push cho order mới / gọi NV / gọi TT._
 
 _Bếp nhận order từ cả NV nhập hộ và khách QR; cập nhật trạng thái món._
 
-- [ ] (51) Màn hình bếp/bar nhận order realtime (KDS)
-- [ ] (53) Cập nhật trạng thái món (Chờ → Đang làm → Hoàn thành → Đã phục vụ)
+- [x] (51) Màn hình bếp/bar nhận order realtime (KDS)
+- [x] (53) Cập nhật trạng thái món (Chờ → Đang làm → Hoàn thành → Đã phục vụ)
 
 ### Bước 1.11 — Hóa đơn & thanh toán tại quầy
 
 _Đóng ca bán hàng trong ngày._
 
-- [ ] (57) Tạo hóa đơn từ order của bàn
-- [ ] (58) Tách hóa đơn / Gộp hóa đơn (cơ bản)
-- [ ] (59) Đa phương thức thanh toán (tiền mặt, thẻ, ví, CK, QR)
-- [ ] (61) Tính thuế và phí dịch vụ tự động
+- [x] (57) Tạo hóa đơn từ order của bàn
+- [x] (58) Tách hóa đơn / Gộp hóa đơn (cơ bản)
+- [x] (59) Đa phương thức thanh toán (tiền mặt, thẻ, ví, CK, QR)
+- [x] (61) Tính thuế và phí dịch vụ tự động
 
 ### Bước 1.12 — Khuyến mãi tối thiểu cho thanh toán
 
 _Đủ để áp giảm giá khi thu tiền (chi tiết KM đầy đủ ở GĐ2)._
 
-- [ ] (64) CRUD chương trình khuyến mãi
-- [ ] (65) Giảm giá theo món / nhóm sản phẩm
-- [ ] (66) Giảm giá theo hóa đơn
-- [ ] (71) Khuyến mãi tự động (không cần mã)
-- [ ] (60) Áp dụng khuyến mãi/mã giảm giá vào hóa đơn
+- [x] (64) CRUD chương trình khuyến mãi
+- [x] (65) Giảm giá theo món / nhóm sản phẩm
+- [x] (66) Giảm giá theo hóa đơn
+- [x] (71) Khuyến mãi tự động (không cần mã)
+- [x] (60) Áp dụng khuyến mãi/mã giảm giá vào hóa đơn
 
 ### Bước 1.13 — Cổng thanh toán điện tử
 
 _Kết nối ngoài #1 — tiền._
 
-- [ ] (102) Tích hợp cổng thanh toán điện tử (VNPay, Momo, ZaloPay, thẻ…)
+- [x] (102) Tích hợp cổng thanh toán điện tử (VNPay, Momo, ZaloPay, thẻ…)
 
 ### Bước 1.14 — Ca làm & phân công cơ bản
 
 _Biết ai đang làm, phụ trách khu nào._
 
-- [ ] (74) Tạo & quản lý mẫu ca làm việc
-- [ ] (75) Xếp lịch làm việc cho nhân viên
-- [ ] (79) Phân công nhân viên theo chi nhánh
-- [ ] (80) Phân công theo khu vực/tầng trong ca
+- [x] (74) Tạo & quản lý mẫu ca làm việc
+- [x] (75) Xếp lịch làm việc cho nhân viên
+- [x] (79) Phân công nhân viên theo chi nhánh
+- [x] (80) Phân công theo khu vực/tầng trong ca
 
 ### Bước 1.15 — Chấm công
 
 _Check-in/out cho bảng công ngày._
 
-- [ ] (77) Chấm công vào/ra ca (Check-in/out)
+- [x] (77) Chấm công vào/ra ca (Check-in/out)
 
 ### Bước 1.16 — Báo cáo doanh thu cơ bản
 
 _Số liệu DT hàng ngày cho chủ quán._
 
-- [ ] (83) Báo cáo doanh thu theo thời gian (ngày/tuần/tháng…)
+- [x] (83) Báo cáo doanh thu theo thời gian (ngày/tuần/tháng…)
 
 ### Bước 1.17 — Kiểm thử vận hành MVP (1 ngày bán thật)
 

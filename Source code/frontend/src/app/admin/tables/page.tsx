@@ -160,10 +160,19 @@ export default function TablesManagementPage() {
     }
   }, [selectedBranchId, fetchData]);
 
+  const getTableQrUrl = useCallback((table: DiningTableDto | null) => {
+    if (!table) return "";
+    if (typeof window !== "undefined") {
+      return `${window.location.origin}/order?tableId=${table.id}&token=${table.qrToken}`;
+    }
+    return table.qrUrl || `http://pumorder.runasp.net/order?tableId=${table.id}&token=${table.qrToken}`;
+  }, []);
+
   // Generate QR code Data URL when activeQrTable changes
   useEffect(() => {
     if (activeQrTable) {
-      QRCode.toDataURL(activeQrTable.qrUrl, {
+      const effectiveUrl = getTableQrUrl(activeQrTable);
+      QRCode.toDataURL(effectiveUrl, {
         width: 380,
         margin: 2,
         color: {
@@ -174,7 +183,7 @@ export default function TablesManagementPage() {
         .then((url) => setQrDataUrl(url))
         .catch((err) => console.error(err));
     }
-  }, [activeQrTable]);
+  }, [activeQrTable, getTableQrUrl]);
 
   // Filtered Tables
   const filteredTables = useMemo(() => {
@@ -196,18 +205,19 @@ export default function TablesManagementPage() {
   useEffect(() => {
     if (isBatchQrModalOpen && filteredTables.length > 0) {
       const urls: Record<string, string> = {};
-      const promises = filteredTables.map((t) =>
-        QRCode.toDataURL(t.qrUrl, {
+      const promises = filteredTables.map((t) => {
+        const effectiveUrl = getTableQrUrl(t);
+        return QRCode.toDataURL(effectiveUrl, {
           width: 250,
           margin: 1,
           color: { dark: "#1c1917", light: "#ffffff" },
         }).then((url) => {
           urls[t.id] = url;
-        })
-      );
+        });
+      });
       Promise.all(promises).then(() => setBatchQrDataUrls(urls));
     }
-  }, [isBatchQrModalOpen, filteredTables]);
+  }, [isBatchQrModalOpen, filteredTables, getTableQrUrl]);
 
   // Stats calculation
   const stats = useMemo(() => {
@@ -1750,7 +1760,7 @@ export default function TablesManagementPage() {
                   Mở Camera hoặc Zalo để quét mã
                 </div>
                 <div className="text-[10px] text-stone-400 mt-1 truncate max-w-full font-mono">
-                  {activeQrTable.qrUrl}
+                  {getTableQrUrl(activeQrTable)}
                 </div>
               </div>
             </div>
@@ -1764,7 +1774,7 @@ export default function TablesManagementPage() {
               <div className="flex items-center gap-2">
                 <button
                   onClick={() =>
-                    handleDownloadQrPng(activeQrTable.code, activeQrTable.qrUrl)
+                    handleDownloadQrPng(activeQrTable.code, getTableQrUrl(activeQrTable))
                   }
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-200 text-xs font-medium border border-stone-700 transition-colors"
                 >

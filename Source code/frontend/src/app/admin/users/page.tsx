@@ -8,6 +8,7 @@ import {
   UserDto,
   BranchDto,
   RoleDto,
+  AreaDto,
   CreateUserRequest,
   UpdateUserRequest,
   UserFilterParams,
@@ -32,6 +33,8 @@ import {
   UserX,
   Shield,
   ExternalLink,
+  Layers,
+  Check,
 } from "lucide-react";
 
 export default function UsersManagementPage() {
@@ -54,6 +57,7 @@ export default function UsersManagementPage() {
   // Modal Create/Edit
   const [modalOpen, setModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<UserDto | null>(null);
+  const [branchAreas, setBranchAreas] = useState<AreaDto[]>([]);
   const [formData, setFormData] = useState({
     displayName: "",
     phoneOrEmail: "",
@@ -61,9 +65,15 @@ export default function UsersManagementPage() {
     pin: "",
     roleId: "" as string,
     branchId: "" as string,
+    assignedAreaIds: [] as string[],
   });
   const [formError, setFormError] = useState<string | null>(null);
   const [formSubmitting, setFormSubmitting] = useState(false);
+
+  // Modal Quick Assign Areas
+  const [quickAssignUser, setQuickAssignUser] = useState<UserDto | null>(null);
+  const [quickAssignAreaIds, setQuickAssignAreaIds] = useState<string[]>([]);
+  const [quickAssignSubmitting, setQuickAssignSubmitting] = useState(false);
 
   // Modal Confirm Lock / Delete
   const [confirmLockUser, setConfirmLockUser] = useState<UserDto | null>(null);
@@ -126,20 +136,37 @@ export default function UsersManagementPage() {
     loadUsers(1);
   }, [keyword, selectedRoleId, selectedBranch, selectedStatus, loadUsers]);
 
+  // Load Areas when branch changes
+  const loadBranchAreas = useCallback(async (branchId?: string) => {
+    if (!branchId) {
+      setBranchAreas([]);
+      return;
+    }
+    try {
+      const areaList = await api.getAreas(branchId);
+      setBranchAreas(Array.isArray(areaList) ? areaList : []);
+    } catch {
+      setBranchAreas([]);
+    }
+  }, []);
+
   // Open Create Modal
   const handleOpenCreate = () => {
     setEditingUser(null);
     const defaultRole = roles.find((r) => r.level >= 5) || roles[0];
+    const targetBranchId = isManager && currentUser?.branchId ? currentUser.branchId : (branches[0]?.id ?? "");
     setFormData({
       displayName: "",
       phoneOrEmail: "",
       password: "",
       pin: "",
       roleId: defaultRole?.id || "",
-      branchId: isManager && currentUser?.branchId ? currentUser.branchId : (branches[0]?.id ?? ""),
+      branchId: targetBranchId,
+      assignedAreaIds: [],
     });
     setFormError(null);
     setModalOpen(true);
+    if (targetBranchId) loadBranchAreas(targetBranchId);
   };
 
   // Open Edit Modal
@@ -152,9 +179,37 @@ export default function UsersManagementPage() {
       pin: "",
       roleId: u.roleId || (roles.find((r) => r.code === u.roleCode)?.id ?? ""),
       branchId: u.branchId || "",
+      assignedAreaIds: u.assignedAreaIds || [],
     });
     setFormError(null);
     setModalOpen(true);
+    if (u.branchId) loadBranchAreas(u.branchId);
+  };
+
+  // Open Quick Assign Areas Modal
+  const handleOpenQuickAssign = async (u: UserDto) => {
+    setQuickAssignUser(u);
+    setQuickAssignAreaIds(u.assignedAreaIds || []);
+    if (u.branchId) {
+      await loadBranchAreas(u.branchId);
+    }
+  };
+
+  // Save Quick Assign Areas
+  const handleSaveQuickAssign = async () => {
+    if (!quickAssignUser) return;
+    setQuickAssignSubmitting(true);
+    try {
+      await api.assignStaffAreas(quickAssignUser.id, quickAssignAreaIds);
+      showToast("success", `Đã phân công khu vực cho nhân viên "${quickAssignUser.displayName}".`);
+      setQuickAssignUser(null);
+      loadUsers();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Không thể phân công khu vực.";
+      showToast("error", msg);
+    } finally {
+      setQuickAssignSubmitting(false);
+    }
   };
 
   // Submit Create / Edit
@@ -175,6 +230,7 @@ export default function UsersManagementPage() {
           phoneOrEmail: formData.phoneOrEmail.trim(),
           roleId: formData.roleId,
           branchId: formData.branchId || null,
+          assignedAreaIds: formData.assignedAreaIds,
         };
         if (formData.password) payload.password = formData.password;
         if (formData.pin) payload.pin = formData.pin;
@@ -193,6 +249,7 @@ export default function UsersManagementPage() {
           pin: formData.pin || undefined,
           roleId: formData.roleId,
           branchId: formData.branchId || null,
+          assignedAreaIds: formData.assignedAreaIds,
         };
 
         await api.createUser(payload);
@@ -432,6 +489,7 @@ export default function UsersManagementPage() {
                 <th className="px-5 py-3.5">Nhân viên</th>
                 <th className="px-4 py-3.5">Cấp bậc & Vai trò</th>
                 <th className="px-4 py-3.5">Chi nhánh làm việc</th>
+                <th className="px-4 py-3.5">Khu vực phục vụ</th>
                 <th className="px-4 py-3.5 text-center">Mã PIN nhanh</th>
                 <th className="px-4 py-3.5 text-center">Trạng thái</th>
                 <th className="px-4 py-3.5">Ngày tạo</th>
@@ -441,7 +499,7 @@ export default function UsersManagementPage() {
             <tbody className="divide-y divide-stone-800/60 text-stone-300">
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="px-5 py-12 text-center text-stone-500">
+                  <td colSpan={8} className="px-5 py-12 text-center text-stone-500">
                     <div className="w-6 h-6 border-2 border-amber-500 border-t-transparent rounded-full animate-spin mx-auto mb-2" />
                     Đang tải danh sách nhân viên...
                   </td>
@@ -501,12 +559,30 @@ export default function UsersManagementPage() {
                         {u.branchName ? (
                           <div className="flex items-center gap-1.5 text-xs text-stone-300">
                             <Building2 className="w-3.5 h-3.5 text-stone-500 shrink-0" />
-                            <span className="truncate max-w-[200px]">{u.branchName}</span>
+                            <span className="truncate max-w-[180px]">{u.branchName}</span>
                           </div>
                         ) : (
                           <span className="text-amber-400/80 font-medium text-[11px]">
                             Toàn chuỗi hệ thống
                           </span>
+                        )}
+                      </td>
+
+                      {/* Assigned Areas */}
+                      <td className="px-4 py-4">
+                        {u.assignedAreaNames && u.assignedAreaNames.length > 0 ? (
+                          <div className="flex flex-wrap gap-1 max-w-[200px]">
+                            {u.assignedAreaNames.map((areaName, idx) => (
+                              <span
+                                key={idx}
+                                className="px-2 py-0.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[10px] font-bold"
+                              >
+                                {areaName}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-[11px] text-stone-500 italic">Toàn chi nhánh</span>
                         )}
                       </td>
 
@@ -545,6 +621,17 @@ export default function UsersManagementPage() {
                       {/* Actions */}
                       <td className="px-5 py-4 text-right">
                         <div className="flex items-center justify-end gap-1.5">
+                          {/* Quick Assign Areas */}
+                          {u.branchId && (
+                            <button
+                              onClick={() => handleOpenQuickAssign(u)}
+                              className="p-1.5 rounded-lg bg-stone-800 hover:bg-amber-500/20 text-stone-300 hover:text-amber-400 border border-transparent hover:border-amber-500/30 transition"
+                              title="Phân công khu vực phục vụ"
+                            >
+                              <Layers className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+
                           {/* Edit */}
                           <button
                             onClick={() => handleOpenEdit(u)}
@@ -761,7 +848,11 @@ export default function UsersManagementPage() {
                 <select
                   value={formData.branchId}
                   disabled={isManager}
-                  onChange={(e) => setFormData({ ...formData, branchId: e.target.value })}
+                  onChange={(e) => {
+                    const bId = e.target.value;
+                    setFormData({ ...formData, branchId: bId, assignedAreaIds: [] });
+                    loadBranchAreas(bId);
+                  }}
                   className="w-full px-3.5 py-2.5 bg-stone-950 border border-stone-800 rounded-xl text-white focus:outline-none focus:border-amber-500 disabled:opacity-50"
                 >
                   {isDirectorOrOwner && (
@@ -779,6 +870,61 @@ export default function UsersManagementPage() {
                   </p>
                 )}
               </div>
+
+              {/* Multi-Area Assignment in Branch */}
+              {formData.branchId && (
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="font-semibold uppercase text-stone-300">
+                      Phân công khu vực phục vụ
+                    </label>
+                    <span className="text-[10px] text-amber-400 font-medium">
+                      {formData.assignedAreaIds.length === 0
+                        ? "Mặc định: Toàn chi nhánh"
+                        : `Đã chọn: ${formData.assignedAreaIds.length} vùng`}
+                    </span>
+                  </div>
+
+                  {branchAreas.length > 0 ? (
+                    <div className="p-3 rounded-xl bg-stone-950 border border-stone-800 space-y-2">
+                      <p className="text-[11px] text-stone-400">
+                        Chọn một hoặc nhiều khu vực mà nhân viên này phụ trách phục vụ:
+                      </p>
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        {branchAreas.map((area) => {
+                          const isSelected = formData.assignedAreaIds.includes(area.id);
+                          return (
+                            <button
+                              key={area.id}
+                              type="button"
+                              onClick={() => {
+                                setFormData((prev) => ({
+                                  ...prev,
+                                  assignedAreaIds: isSelected
+                                    ? prev.assignedAreaIds.filter((id) => id !== area.id)
+                                    : [...prev.assignedAreaIds, area.id],
+                                }));
+                              }}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
+                                isSelected
+                                  ? "bg-amber-500 text-stone-950 shadow-md shadow-amber-500/20"
+                                  : "bg-stone-900 text-stone-300 hover:text-white border border-stone-800"
+                              }`}
+                            >
+                              <span>{isSelected ? "✓" : "+"}</span>
+                              <span>{area.name}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="p-3 rounded-xl bg-stone-950 border border-stone-800 text-[11px] text-stone-500 italic">
+                      Chi nhánh này chưa có khu vực nào.
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Submit / Cancel Buttons */}
               <div className="flex justify-end gap-2.5 pt-4 border-t border-stone-800">
@@ -902,6 +1048,93 @@ export default function UsersManagementPage() {
                 className="px-4 py-2 rounded-xl bg-rose-500 hover:bg-rose-400 text-white font-bold shadow-md"
               >
                 {actionLoading ? "Đang xóa..." : "Xác nhận Xóa"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Quick Assign Areas */}
+      {quickAssignUser && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-stone-900 border border-stone-800 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-stone-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center justify-center">
+                  <Layers className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-white text-sm">Phân công khu vực phục vụ</h4>
+                  <p className="text-xs text-stone-400">{quickAssignUser.displayName} ({quickAssignUser.branchName || "Chi nhánh"})</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setQuickAssignUser(null)}
+                className="p-1.5 rounded-xl text-stone-400 hover:text-white hover:bg-stone-800"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-stone-300">
+              Nhân viên có thể được phân công phục vụ đồng thời <strong>nhiều khu vực</strong>. Nếu bỏ chọn tất cả, nhân viên sẽ phục vụ toàn bộ chi nhánh.
+            </p>
+
+            <div className="p-3 rounded-2xl bg-stone-950 border border-stone-800 max-h-60 overflow-y-auto space-y-2">
+              {branchAreas.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {branchAreas.map((area) => {
+                    const isSelected = quickAssignAreaIds.includes(area.id);
+                    return (
+                      <button
+                        key={area.id}
+                        type="button"
+                        onClick={() => {
+                          setQuickAssignAreaIds((prev) =>
+                            isSelected
+                              ? prev.filter((id) => id !== area.id)
+                              : [...prev, area.id]
+                          );
+                        }}
+                        className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+                          isSelected
+                            ? "bg-amber-500 text-stone-950 shadow-md shadow-amber-500/20"
+                            : "bg-stone-900 text-stone-300 hover:text-white border border-stone-800"
+                        }`}
+                      >
+                        <span>{isSelected ? "✓" : "+"}</span>
+                        <span>{area.name}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="text-xs text-stone-500 italic text-center py-4">
+                  Chi nhánh này chưa có khu vực nào được tạo.
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 text-xs pt-2 border-t border-stone-800">
+              <button
+                type="button"
+                onClick={() => setQuickAssignUser(null)}
+                className="px-4 py-2 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-300 font-semibold"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                disabled={quickAssignSubmitting}
+                onClick={handleSaveQuickAssign}
+                className="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold shadow-md flex items-center gap-1.5"
+              >
+                {quickAssignSubmitting ? (
+                  <div className="w-3.5 h-3.5 border-2 border-stone-950 border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <Check className="w-4 h-4" />
+                )}
+                <span>Lưu phân công</span>
               </button>
             </div>
           </div>

@@ -14,6 +14,9 @@ import {
   StaffOrderLineRequest,
   StaffOrderSelectedOption,
   TableNotificationDto,
+  InvoiceDto,
+  VietQrInfoDto,
+  PromotionDto,
 } from "@/shared/api/client";
 import {
   ShoppingCart,
@@ -44,6 +47,17 @@ import {
   Receipt,
   DollarSign,
   QrCode,
+  Printer,
+  CreditCard,
+  Smartphone,
+  Split,
+  Merge,
+  CheckSquare,
+  Square,
+  Tag,
+  Zap,
+  Gift,
+  Percent,
 } from "lucide-react";
 
 interface CartItem {
@@ -107,18 +121,55 @@ function PosContent() {
   const [confirmingTicketId, setConfirmingTicketId] = useState<string | null>(null);
   const [notification, setNotification] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
+  // ==========================================
+  // CHECKOUT & PAYMENT STATE (STT 57, 58, 59, 61)
+  // ==========================================
+  const [isCheckoutModalOpen, setIsCheckoutModalOpen] = useState(false);
+  const [activeInvoice, setActiveInvoice] = useState<InvoiceDto | null>(null);
+  const [vietQrInfo, setVietQrInfo] = useState<VietQrInfoDto | null>(null);
+  const [isCreatingInvoice, setIsCreatingInvoice] = useState(false);
+  const [isSettlingPayment, setIsSettlingPayment] = useState(false);
+  const [checkoutMode, setCheckoutMode] = useState<"full" | "split" | "merge">("full");
+  const [splitSelectedLineIds, setSplitSelectedLineIds] = useState<string[]>([]);
+  const [mergeSelectedSessionIds, setMergeSelectedSessionIds] = useState<string[]>([]);
+  const [paymentMethod, setPaymentMethod] = useState<"Cash" | "BankTransfer" | "VNPay" | "MoMo" | "CardPos" | "EWallet">("Cash");
+  const [receivedCash, setReceivedCash] = useState<number>(0);
+  const [customerName, setCustomerName] = useState<string>("");
+  const [customerPhone, setCustomerPhone] = useState<string>("");
+  const [checkoutSuccess, setCheckoutSuccess] = useState(false);
+
+  // Gateway state (STT 102)
+  const [vnpayUrl, setVnpayUrl] = useState<string | null>(null);
+  const [momoQrUrl, setMomoQrUrl] = useState<string | null>(null);
+  const [isGeneratingGatewayUrl, setIsGeneratingGatewayUrl] = useState(false);
+
+  // Promotion / Voucher state (STT 60, 71)
+  const [voucherInput, setVoucherInput] = useState<string>("");
+  const [isApplyingVoucher, setIsApplyingVoucher] = useState(false);
+  const [voucherMsg, setVoucherMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [activePromosList, setActivePromosList] = useState<PromotionDto[]>([]);
+
   // Load initial data
   useEffect(() => {
     if (!activeBranchId) return;
     loadAllData();
     loadNotifications();
 
-    // Polling notifications every 10 seconds
+    // Polling notifications and table session every 3 seconds for realtime responsiveness
     const timer = setInterval(() => {
       loadNotifications();
-    }, 10000);
+    }, 3000);
     return () => clearInterval(timer);
   }, [activeBranchId]);
+
+  // Periodic silent refresh for current table session
+  useEffect(() => {
+    if (!selectedTableId) return;
+    const sessionTimer = setInterval(() => {
+      loadTableSession(selectedTableId, true);
+    }, 3000);
+    return () => clearInterval(sessionTimer);
+  }, [selectedTableId]);
 
   const loadAllData = async () => {
     try {
@@ -166,13 +217,13 @@ function PosContent() {
     loadTableSession(selectedTableId);
   }, [selectedTableId]);
 
-  const loadTableSession = async (tableId: string) => {
+  const loadTableSession = async (tableId: string, isSilent = false) => {
     try {
-      setSessionLoading(true);
+      if (!isSilent) setSessionLoading(true);
       try {
         const session = await api.getActiveSessionByTable(tableId);
         setCurrentSession(session);
-        if (session.tickets.length > 0) {
+        if (!isSilent && session.tickets.length > 0) {
           setActiveCartTab("current");
         }
       } catch {
@@ -181,7 +232,7 @@ function PosContent() {
     } catch (err: any) {
       console.error(err);
     } finally {
-      setSessionLoading(false);
+      if (!isSilent) setSessionLoading(false);
     }
   };
 
@@ -289,17 +340,16 @@ function PosContent() {
     });
   }, [menuItems, selectedCategoryId, searchKeyword]);
 
-  // Click menu item -> Check if has options
+  // Click menu item -> Luôn mở popup xem chi tiết món
   const handleItemClick = async (item: MenuItemDto) => {
-    if (item.optionsCount && item.optionsCount > 0) {
-      try {
-        const fullItem = await api.getMenuItemById(item.id);
-        openCustomizationModal(fullItem);
-      } catch (err: any) {
-        setNotification({ type: "error", message: "Lỗi tải tùy chọn món." });
-      }
-    } else {
-      addDirectToCart(item);
+    try {
+      const fullItem = await api.getMenuItem(item.id);
+      openCustomizationModal(fullItem);
+    } catch (err: any) {
+      openCustomizationModal({
+        ...item,
+        options: [],
+      } as MenuItemDetailDto);
     }
   };
 
@@ -493,10 +543,207 @@ function PosContent() {
         type: "success",
         message: `Đã gửi ${lines.length} món xuống Bếp/Bar cho bàn ${updatedSession.tableName}!`,
       });
-    } catch (err: any) {
-      setNotification({ type: "error", message: err.message || "Lỗi gửi đơn đến bếp." });
+    } catch (err: unknown) {
+      const error = err as Error;
+      setNotification({ type: "error", message: error.message || "Lỗi gửi đơn đến bếp." });
     } finally {
       setSubmittingOrder(false);
+    }
+  };
+
+  // List of all valid lines in active session
+  const allSessionLines = useMemo(() => {
+    if (!currentSession) return [];
+    return currentSession.tickets.flatMap((t) =>
+      t.lines.filter((l) => l.status !== "Cancelled" && l.status !== "PendingConfirm")
+    );
+  }, [currentSession]);
+
+  // List of occupied tables that can be merged
+  const occupiedTablesForMerge = useMemo(() => {
+    return tables.filter((t) => t.id !== selectedTableId && t.status === "Occupied");
+  }, [tables, selectedTableId]);
+
+  // Open Checkout Modal (STT 57, 61)
+  const handleOpenCheckout = async () => {
+    if (!currentSession) return;
+    setIsCheckoutModalOpen(true);
+    setCheckoutMode("full");
+    setCheckoutSuccess(false);
+    setSplitSelectedLineIds([]);
+    setMergeSelectedSessionIds([]);
+    setPaymentMethod("Cash");
+    setReceivedCash(0);
+    setCustomerName("");
+    setCustomerPhone("");
+    setVietQrInfo(null);
+    setVoucherInput("");
+    setVoucherMsg(null);
+
+    try {
+      setIsCreatingInvoice(true);
+      const inv = await api.createInvoiceFromSession({
+        sessionId: currentSession.id,
+      });
+      setActiveInvoice(inv);
+      setReceivedCash(inv.finalAmount);
+
+      // Load active promotions for quick apply (STT 60, 71)
+      try {
+        const promos = await api.getPromotions(activeBranchId, true);
+        setActivePromosList(promos);
+      } catch {
+        // ignore
+      }
+
+      try {
+        const qr = await api.getVietQr(inv.id);
+        setVietQrInfo(qr);
+      } catch {
+        // ignore
+      }
+    } catch (err: unknown) {
+      const error = err as Error;
+      setNotification({ type: "error", message: "Lỗi lập hóa đơn: " + error.message });
+    } finally {
+      setIsCreatingInvoice(false);
+    }
+  };
+
+  // Apply Voucher / Promo Handler (STT 60, 71)
+  const handleApplyVoucher = async (codeToUse?: string) => {
+    if (!activeInvoice) return;
+    const code = (codeToUse ?? voucherInput).trim().toUpperCase();
+    if (!code) {
+      setVoucherMsg({ type: "error", text: "Vui lòng nhập mã voucher." });
+      return;
+    }
+
+    try {
+      setIsApplyingVoucher(true);
+      setVoucherMsg(null);
+      const updatedInv = await api.applyPromoToInvoice(activeInvoice.id, {
+        voucherCode: code,
+      });
+      setActiveInvoice(updatedInv);
+      setReceivedCash(updatedInv.finalAmount);
+      setVoucherInput(code);
+      setVoucherMsg({
+        type: "success",
+        text: `Đã áp dụng mã ${code} (-${updatedInv.discountAmount.toLocaleString("vi-VN")}đ)`,
+      });
+
+      // Refresh VietQR
+      try {
+        const qr = await api.getVietQr(updatedInv.id);
+        setVietQrInfo(qr);
+      } catch {
+        // ignore
+      }
+    } catch (err: unknown) {
+      const error = err as Error;
+      setVoucherMsg({ type: "error", text: error.message || "Mã không hợp lệ hoặc không đủ điều kiện." });
+    } finally {
+      setIsApplyingVoucher(false);
+    }
+  };
+
+  // Split Bill Handler (STT 58)
+  const handleGenerateSplitInvoice = async () => {
+    if (!currentSession || splitSelectedLineIds.length === 0) return;
+    try {
+      setIsCreatingInvoice(true);
+      const inv = await api.createInvoiceFromSession({
+        sessionId: currentSession.id,
+        selectedLineIds: splitSelectedLineIds,
+        customerName: customerName.trim() || undefined,
+        customerPhone: customerPhone.trim() || undefined,
+      });
+      setActiveInvoice(inv);
+      setReceivedCash(inv.finalAmount);
+      try {
+        const qr = await api.getVietQr(inv.id);
+        setVietQrInfo(qr);
+      } catch {
+        // ignore
+      }
+    } catch (err: unknown) {
+      const error = err as Error;
+      setNotification({ type: "error", message: "Lỗi tách hóa đơn: " + error.message });
+    } finally {
+      setIsCreatingInvoice(false);
+    }
+  };
+
+  // Merge Tables Bill Handler (STT 58)
+  const handleGenerateMergeInvoice = async () => {
+    if (!currentSession || mergeSelectedSessionIds.length === 0) return;
+    try {
+      setIsCreatingInvoice(true);
+      const allSessionIds = [currentSession.id, ...mergeSelectedSessionIds];
+      const inv = await api.mergeTablesInvoice({
+        branchId: activeBranchId,
+        sessionIds: allSessionIds,
+        customerName: customerName.trim() || undefined,
+        customerPhone: customerPhone.trim() || undefined,
+      });
+      setActiveInvoice(inv);
+      setReceivedCash(inv.finalAmount);
+      try {
+        const qr = await api.getVietQr(inv.id);
+        setVietQrInfo(qr);
+      } catch {
+        // ignore
+      }
+    } catch (err: unknown) {
+      const error = err as Error;
+      setNotification({ type: "error", message: "Lỗi gộp hóa đơn: " + error.message });
+    } finally {
+      setIsCreatingInvoice(false);
+    }
+  };
+
+  // Settle Payment Handler (STT 59, 61)
+  const handleConfirmPayment = async () => {
+    if (!activeInvoice) return;
+    try {
+      setIsSettlingPayment(true);
+      const settled = await api.settlePayment({
+        invoiceId: activeInvoice.id,
+        payments: [
+          {
+            paymentMethod,
+            amount: activeInvoice.finalAmount,
+          },
+        ],
+        receivedCashAmount: paymentMethod === "Cash" ? receivedCash : activeInvoice.finalAmount,
+        closeSessionAfterPayment: true,
+        customerName: customerName.trim() || undefined,
+        customerPhone: customerPhone.trim() || undefined,
+      });
+
+      setActiveInvoice(settled);
+      setCheckoutSuccess(true);
+      setNotification({
+        type: "success",
+        message: `Thanh toán thành công hóa đơn ${settled.invoiceNumber} (${settled.finalAmount.toLocaleString("vi-VN")}đ)!`,
+      });
+
+      // Reload tables and clear current table session
+      loadAllData();
+      if (checkoutMode !== "split") {
+        setCurrentSession(null);
+      } else {
+        // Reload current session after split payment
+        if (currentSession) {
+          api.getSessionById(currentSession.id).then(setCurrentSession).catch(() => setCurrentSession(null));
+        }
+      }
+    } catch (err: unknown) {
+      const error = err as Error;
+      setNotification({ type: "error", message: "Lỗi thanh toán: " + error.message });
+    } finally {
+      setIsSettlingPayment(false);
     }
   };
 
@@ -694,6 +941,40 @@ function PosContent() {
         </div>
       </header>
 
+      {/* Realtime Notification Ticker across All Tables */}
+      {notifications.length > 0 && (
+        <div className="bg-amber-500/15 border-b border-amber-500/30 px-4 py-2 flex items-center justify-between gap-3 overflow-x-auto text-xs animate-in fade-in">
+          <div className="flex items-center gap-2 text-amber-300 font-bold shrink-0">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+            </span>
+            <Bell className="w-4 h-4 text-amber-400" />
+            <span>Có {notifications.length} yêu cầu mới từ bàn:</span>
+          </div>
+          <div className="flex items-center gap-2 overflow-x-auto py-0.5">
+            {notifications.map((n) => (
+              <button
+                key={n.id}
+                type="button"
+                onClick={() => {
+                  setSelectedTableId(n.tableId);
+                  handleDismissNotification(n.id);
+                  setActiveCartTab("history");
+                }}
+                className="px-3 py-1 rounded-xl bg-stone-900 hover:bg-stone-800 border border-amber-500/40 text-stone-200 text-xs flex items-center gap-1.5 shrink-0 transition"
+              >
+                <span className="font-bold text-amber-400">[{n.tableName || n.tableCode}]</span>
+                <span className="text-stone-300 max-w-xs truncate">{n.message}</span>
+                <span className="text-[10px] bg-amber-500 text-stone-950 font-bold px-1.5 py-0.5 rounded">
+                  Xử lý →
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* STT 24 Alert: Pending Confirm QR Orders on Current Table */}
       {pendingQrTickets.length > 0 && (
         <div className="bg-amber-500/10 border-b border-amber-500/30 px-4 py-2 flex items-center justify-between gap-3 text-amber-300 text-xs font-bold animate-in fade-in">
@@ -797,9 +1078,9 @@ function PosContent() {
                   </div>
 
                   {/* Options indicator */}
-                  {item.optionsCount > 0 && (
+                  {item.optionCount > 0 && (
                     <div className="absolute bottom-2 right-2 px-2 py-0.5 rounded-md bg-amber-500/90 text-stone-950 text-[10px] font-bold shadow-sm">
-                      +{item.optionsCount} tùy chọn
+                      +{item.optionCount} tùy chọn
                     </div>
                   )}
                 </div>
@@ -820,7 +1101,15 @@ function PosContent() {
                   <span className="text-xs font-extrabold text-amber-400 font-mono">
                     {item.price.toLocaleString("vi-VN")}đ
                   </span>
-                  <button className="w-6 h-6 rounded-lg bg-stone-800 group-hover:bg-amber-500 text-stone-400 group-hover:text-stone-950 flex items-center justify-center transition-colors">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      addDirectToCart(item);
+                    }}
+                    className="w-6 h-6 rounded-lg bg-stone-800 hover:bg-amber-500 text-stone-400 hover:text-stone-950 flex items-center justify-center transition-colors shadow-sm"
+                    title="Thêm nhanh 1 phần"
+                  >
                     <Plus className="w-3.5 h-3.5 font-bold" />
                   </button>
                 </div>
@@ -1127,20 +1416,32 @@ function PosContent() {
 
               {/* Total Session Bill Footer */}
               {currentSession && (
-                <div className="p-3 border-t border-stone-800 bg-stone-900/90 flex items-center justify-between">
-                  <div>
-                    <span className="text-[11px] text-stone-400 block">
-                      Tổng tiền bàn ({currentSession.totalItemsCount} món):
-                    </span>
-                    <span className="text-lg font-extrabold text-emerald-400 font-mono">
-                      {currentSession.totalAmount.toLocaleString("vi-VN")}đ
-                    </span>
+                <div className="p-3 border-t border-stone-800 bg-stone-900/95 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-[11px] text-stone-400 block">
+                        Tổng tiền bàn ({currentSession.totalItemsCount} món):
+                      </span>
+                      <span className="text-lg font-extrabold text-emerald-400 font-mono">
+                        {currentSession.totalAmount.toLocaleString("vi-VN")}đ
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => setActiveCartTab("current")}
+                      className="px-3 py-1.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-300 text-xs font-semibold border border-stone-700 transition"
+                    >
+                      + Gọi thêm
+                    </button>
                   </div>
+
+                  {/* Checkout Button */}
                   <button
-                    onClick={() => setActiveCartTab("current")}
-                    className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-stone-950 font-bold text-xs shadow-md"
+                    onClick={handleOpenCheckout}
+                    disabled={currentSession.totalItemsCount === 0}
+                    className="w-full py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 disabled:opacity-40 text-stone-950 font-black text-xs shadow-lg shadow-emerald-500/20 transition-all flex items-center justify-center gap-2"
                   >
-                    + Gọi thêm món
+                    <Receipt className="w-4 h-4" />
+                    <span>THANH TOÁN HÓA ĐƠN (STT 57-61)</span>
                   </button>
                 </div>
               )}
@@ -1262,6 +1563,703 @@ function PosContent() {
       )}
 
       {/* ============================================================== */}
+      {/* MODAL: CHECKOUT, SPLIT, MERGE & SETTLEMENT (STT 57, 58, 59, 61) */}
+      {/* ============================================================== */}
+      {isCheckoutModalOpen && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-stone-900 border border-stone-800 rounded-3xl w-full max-w-4xl max-h-[92vh] flex flex-col overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="p-4 border-b border-stone-800 flex items-center justify-between bg-stone-950">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-500 flex items-center justify-center text-stone-950 font-bold shadow-lg shadow-emerald-500/20">
+                  <Receipt className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white flex items-center gap-2">
+                    THANH TOÁN HÓA ĐƠN
+                    {activeInvoice && (
+                      <span className="font-mono text-amber-400">#{activeInvoice.invoiceNumber}</span>
+                    )}
+                  </h3>
+                  <p className="text-xs text-stone-400">
+                    Bàn: <strong className="text-stone-200">{activeInvoice?.tableCodeSnapshot || currentSession?.tableName}</strong> • {currentSession?.areaName || "Sảnh"}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {checkoutSuccess && (
+                  <button
+                    onClick={() => window.print()}
+                    className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 text-xs font-bold transition shadow flex items-center gap-1"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>In Phiếu (80mm)</span>
+                  </button>
+                )}
+
+                <button
+                  onClick={() => setIsCheckoutModalOpen(false)}
+                  className="p-2 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-400 hover:text-white transition"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Subheader Modes Switcher (Toàn bộ / Tách bill / Gộp bàn) */}
+            {!checkoutSuccess && (
+              <div className="bg-stone-950/70 border-b border-stone-800/80 px-4 py-2 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center bg-stone-900 p-1 rounded-xl border border-stone-800 text-xs">
+                  <button
+                    onClick={() => {
+                      setCheckoutMode("full");
+                      handleOpenCheckout();
+                    }}
+                    className={`px-3 py-1 rounded-lg font-bold transition ${
+                      checkoutMode === "full"
+                        ? "bg-amber-500 text-stone-950 shadow-sm"
+                        : "text-stone-400 hover:text-stone-200"
+                    }`}
+                  >
+                    Thanh toán cả bàn
+                  </button>
+                  <button
+                    onClick={() => setCheckoutMode("split")}
+                    className={`px-3 py-1 rounded-lg font-bold flex items-center gap-1 transition ${
+                      checkoutMode === "split"
+                        ? "bg-amber-500 text-stone-950 shadow-sm"
+                        : "text-stone-400 hover:text-stone-200"
+                    }`}
+                  >
+                    <Split className="w-3 h-3" />
+                    <span>Tách hóa đơn (STT 58)</span>
+                  </button>
+                  <button
+                    onClick={() => setCheckoutMode("merge")}
+                    className={`px-3 py-1 rounded-lg font-bold flex items-center gap-1 transition ${
+                      checkoutMode === "merge"
+                        ? "bg-amber-500 text-stone-950 shadow-sm"
+                        : "text-stone-400 hover:text-stone-200"
+                    }`}
+                  >
+                    <Merge className="w-3 h-3" />
+                    <span>Gộp bàn (STT 58)</span>
+                  </button>
+                </div>
+
+                <span className="text-[11px] text-stone-400 font-mono">
+                  Thu ngân: <strong className="text-amber-400">{user?.displayName || "Nhân viên"}</strong>
+                </span>
+              </div>
+            )}
+
+            {/* Modal Body */}
+            <div className="flex-1 overflow-y-auto p-4 md:p-6 grid grid-cols-1 md:grid-cols-12 gap-6 bg-stone-950/40">
+              {isCreatingInvoice ? (
+                <div className="col-span-12 h-64 flex flex-col items-center justify-center gap-3">
+                  <RefreshCw className="w-8 h-8 animate-spin text-amber-500" />
+                  <p className="text-xs text-stone-400">Đang tổng hợp món và tính thuế/phí...</p>
+                </div>
+              ) : checkoutSuccess && activeInvoice ? (
+                /* ============================================== */
+                /* PAYMENT SUCCESS SCREEN & RECEIPT PREVIEW       */
+                /* ============================================== */
+                <div className="col-span-12 flex flex-col items-center justify-center space-y-4 max-w-lg mx-auto text-center py-6">
+                  <div className="w-16 h-16 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 animate-bounce">
+                    <CheckCircle2 className="w-8 h-8" />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-bold text-white">THANH TOÁN THÀNH CÔNG!</h3>
+                    <p className="text-xs text-stone-400 mt-1">
+                      Hóa đơn <strong className="text-amber-400 font-mono">#{activeInvoice.invoiceNumber}</strong> đã được thu đủ tiền ({activeInvoice.finalAmount.toLocaleString("vi-VN")}đ).
+                    </p>
+                    <p className="text-xs text-stone-500 mt-0.5">
+                      Bàn <strong className="text-stone-300">{activeInvoice.tableCodeSnapshot}</strong> đã chuyển sang trạng thái chờ dọn dẹp.
+                    </p>
+                  </div>
+
+                  {activeInvoice.changeAmount > 0 && (
+                    <div className="bg-emerald-950/60 border border-emerald-500/30 p-3 rounded-2xl w-full text-center">
+                      <span className="text-xs text-emerald-300 uppercase tracking-wider block font-semibold">
+                        Tiền thừa trả khách:
+                      </span>
+                      <span className="text-2xl font-black text-emerald-400 font-mono">
+                        {activeInvoice.changeAmount.toLocaleString("vi-VN")}đ
+                      </span>
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-3 pt-2 w-full">
+                    <button
+                      onClick={() => window.print()}
+                      className="flex-1 py-3 rounded-2xl bg-stone-800 hover:bg-stone-700 text-stone-200 text-xs font-bold border border-stone-700 transition flex items-center justify-center gap-2"
+                    >
+                      <Printer className="w-4 h-4" />
+                      <span>In Hóa đơn</span>
+                    </button>
+                    <button
+                      onClick={() => setIsCheckoutModalOpen(false)}
+                      className="flex-1 py-3 rounded-2xl bg-amber-500 hover:bg-amber-400 text-stone-950 text-xs font-extrabold shadow-lg transition"
+                    >
+                      Hoàn tất & Tiếp tục
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {/* Left Column: Order Items & Mode Selection */}
+                  <div className="md:col-span-7 space-y-4">
+                    {/* MODE 1: SPLIT BILL (STT 58) */}
+                    {checkoutMode === "split" && (
+                      <div className="bg-stone-900 border border-amber-500/30 p-3.5 rounded-2xl space-y-3">
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-xs font-bold text-amber-400 flex items-center gap-1.5">
+                            <Split className="w-4 h-4" />
+                            <span>Tách bill: Chọn món cần thanh toán riêng đợt này</span>
+                          </h4>
+                          <span className="text-[11px] text-stone-400 font-mono">
+                            Đã chọn: {splitSelectedLineIds.length}/{allSessionLines.length} món
+                          </span>
+                        </div>
+
+                        <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                          {allSessionLines.map((line) => {
+                            const isSelected = splitSelectedLineIds.includes(line.id);
+                            return (
+                              <button
+                                key={line.id}
+                                type="button"
+                                onClick={() => {
+                                  if (isSelected) {
+                                    setSplitSelectedLineIds((prev) => prev.filter((id) => id !== line.id));
+                                  } else {
+                                    setSplitSelectedLineIds((prev) => [...prev, line.id]);
+                                  }
+                                }}
+                                className={`w-full p-2 rounded-xl text-xs border text-left flex items-center justify-between transition ${
+                                  isSelected
+                                    ? "bg-amber-500/15 border-amber-500 text-amber-300"
+                                    : "bg-stone-950 border-stone-800 text-stone-400 hover:border-stone-700"
+                                }`}
+                              >
+                                <div className="flex items-center gap-2">
+                                  {isSelected ? (
+                                    <CheckSquare className="w-4 h-4 text-amber-400 flex-shrink-0" />
+                                  ) : (
+                                    <Square className="w-4 h-4 text-stone-600 flex-shrink-0" />
+                                  )}
+                                  <div>
+                                    <span className="font-bold text-white">
+                                      x{line.quantity} {line.itemName}
+                                    </span>
+                                    {line.selectedOptionsText && (
+                                      <p className="text-[10px] text-stone-500">{line.selectedOptionsText}</p>
+                                    )}
+                                  </div>
+                                </div>
+                                <span className="font-mono font-bold text-stone-200">
+                                  {(line.unitPrice * line.quantity).toLocaleString("vi-VN")}đ
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={handleGenerateSplitInvoice}
+                          disabled={splitSelectedLineIds.length === 0}
+                          className="w-full py-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-stone-950 text-xs font-bold transition shadow"
+                        >
+                          Tạo hóa đơn cho các món đã chọn ({splitSelectedLineIds.length} món)
+                        </button>
+                      </div>
+                    )}
+
+                    {/* MODE 2: MERGE TABLES (STT 58) */}
+                    {checkoutMode === "merge" && (
+                      <div className="bg-stone-900 border border-purple-500/30 p-3.5 rounded-2xl space-y-3">
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-xs font-bold text-purple-400 flex items-center gap-1.5">
+                            <Merge className="w-4 h-4" />
+                            <span>Gộp bàn: Chọn các bàn khác để gộp chung hóa đơn</span>
+                          </h4>
+                          <span className="text-[11px] text-stone-400">
+                            Bàn gốc: <strong className="text-white">{selectedTable?.code}</strong>
+                          </span>
+                        </div>
+
+                        {occupiedTablesForMerge.length === 0 ? (
+                          <p className="text-xs text-stone-500 py-3 text-center">
+                            Không có bàn nào khác đang có khách trong chi nhánh.
+                          </p>
+                        ) : (
+                          <div className="grid grid-cols-2 gap-2">
+                            {occupiedTablesForMerge.map((tbl) => {
+                              // We find the session id for this table from table session detail or tables
+                              const isSelected = mergeSelectedSessionIds.includes(tbl.id);
+                              return (
+                                <button
+                                  key={tbl.id}
+                                  type="button"
+                                  onClick={async () => {
+                                    if (isSelected) {
+                                      setMergeSelectedSessionIds((prev) => prev.filter((id) => id !== tbl.id));
+                                    } else {
+                                      // Get active session id of this table
+                                      try {
+                                        const tblSess = await api.getSessionByTable(tbl.id);
+                                        if (tblSess) {
+                                          setMergeSelectedSessionIds((prev) => [...prev, tblSess.id]);
+                                        }
+                                      } catch {
+                                        // ignore
+                                      }
+                                    }
+                                  }}
+                                  className={`p-2.5 rounded-xl text-xs border text-left flex items-center justify-between transition ${
+                                    isSelected
+                                      ? "bg-purple-500/20 border-purple-500 text-purple-300 font-bold"
+                                      : "bg-stone-950 border-stone-800 text-stone-400 hover:border-stone-700"
+                                  }`}
+                                >
+                                  <div>
+                                    <span className="font-bold text-white block">{tbl.code}</span>
+                                    <span className="text-[10px] text-stone-500">{tbl.name}</span>
+                                  </div>
+                                  {isSelected ? (
+                                    <CheckSquare className="w-4 h-4 text-purple-400" />
+                                  ) : (
+                                    <Square className="w-4 h-4 text-stone-600" />
+                                  )}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={handleGenerateMergeInvoice}
+                          disabled={mergeSelectedSessionIds.length === 0}
+                          className="w-full py-2 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-white text-xs font-bold transition shadow"
+                        >
+                          Gộp các bàn đã chọn thành 1 hóa đơn ({mergeSelectedSessionIds.length + 1} bàn)
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Invoice Lines Table */}
+                    {activeInvoice && (
+                      <div className="bg-stone-900 border border-stone-800 rounded-2xl p-4 space-y-3">
+                        <div className="flex items-center justify-between pb-2 border-b border-stone-800">
+                          <span className="text-xs font-bold text-stone-300 uppercase tracking-wider">
+                            Danh sách món trong hóa đơn ({activeInvoice.lines.length})
+                          </span>
+                          <span className="text-xs font-mono text-stone-400">
+                            Bàn: <strong className="text-white">{activeInvoice.tableCodeSnapshot}</strong>
+                          </span>
+                        </div>
+
+                        <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                          {activeInvoice.lines.map((line) => (
+                            <div
+                              key={line.id}
+                              className="flex items-start justify-between text-xs py-1 border-b border-stone-800/40 last:border-0"
+                            >
+                              <div className="flex-1">
+                                <div className="font-bold text-stone-200">
+                                  {line.quantity}x {line.itemName}
+                                </div>
+                                {line.selectedOptionsText && (
+                                  <p className="text-[10px] text-stone-500">{line.selectedOptionsText}</p>
+                                )}
+                                {line.note && (
+                                  <p className="text-[10px] text-amber-400/90 italic">* {line.note}</p>
+                                )}
+                              </div>
+                              <div className="text-right font-mono">
+                                <span className="font-bold text-stone-100">
+                                  {line.totalPrice.toLocaleString("vi-VN")}đ
+                                </span>
+                                <span className="block text-[10px] text-stone-500">
+                                  ({line.unitPrice.toLocaleString("vi-VN")}đ/món)
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Customer info (Optional) */}
+                    <div className="bg-stone-900 border border-stone-800 rounded-2xl p-3.5 space-y-2">
+                      <span className="text-xs font-bold text-stone-300 block">Thông tin khách hàng (Tùy chọn)</span>
+                      <div className="grid grid-cols-2 gap-2">
+                        <input
+                          type="text"
+                          value={customerName}
+                          onChange={(e) => setCustomerName(e.target.value)}
+                          placeholder="Tên khách hàng"
+                          className="bg-stone-950 border border-stone-800 rounded-xl px-3 py-1.5 text-xs text-white placeholder-stone-600 focus:outline-none focus:border-amber-500"
+                        />
+                        <input
+                          type="tel"
+                          value={customerPhone}
+                          onChange={(e) => setCustomerPhone(e.target.value)}
+                          placeholder="Số điện thoại"
+                          className="bg-stone-950 border border-stone-800 rounded-xl px-3 py-1.5 text-xs text-white placeholder-stone-600 focus:outline-none focus:border-amber-500"
+                        />
+                      </div>
+                    </div>
+
+                    {/* VOUCHER & KHUYẾN MÃI (STT 60, 65, 66, 71) */}
+                    <div className="bg-stone-900 border border-stone-800 rounded-2xl p-3.5 space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-amber-400 flex items-center gap-1.5">
+                          <Tag className="w-4 h-4" />
+                          <span>Mã giảm giá & Khuyến mãi (STT 60, 71)</span>
+                        </span>
+                        {activeInvoice?.voucherCode && (
+                          <span className="px-2 py-0.5 rounded-lg bg-amber-500/20 text-amber-300 font-mono text-[11px] font-bold border border-amber-500/30">
+                            Đã áp dụng: {activeInvoice.voucherCode}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={voucherInput}
+                          onChange={(e) => setVoucherInput(e.target.value.toUpperCase())}
+                          placeholder="Nhập mã voucher (VD: PUMOPEN, GIAM50K)..."
+                          className="flex-1 bg-stone-950 border border-stone-800 rounded-xl px-3 py-1.5 text-xs font-mono font-bold text-amber-400 placeholder-stone-600 focus:outline-none focus:border-amber-500 uppercase"
+                        />
+                        <button
+                          type="button"
+                          disabled={isApplyingVoucher || !voucherInput.trim()}
+                          onClick={() => handleApplyVoucher()}
+                          className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-stone-950 text-xs font-bold transition shadow"
+                        >
+                          {isApplyingVoucher ? "..." : "Áp dụng"}
+                        </button>
+                      </div>
+
+                      {/* Voucher Message Feedback */}
+                      {voucherMsg && (
+                        <div
+                          className={`p-2 rounded-xl text-[11px] font-medium flex items-center gap-1.5 ${
+                            voucherMsg.type === "success"
+                              ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                              : "bg-rose-500/10 text-rose-400 border border-rose-500/20"
+                          }`}
+                        >
+                          {voucherMsg.type === "success" ? (
+                            <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />
+                          ) : (
+                            <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
+                          )}
+                          <span>{voucherMsg.text}</span>
+                        </div>
+                      )}
+
+                      {/* Suggestions: Quick Apply Active Promotions */}
+                      {activePromosList.length > 0 && (
+                        <div className="space-y-1.5 pt-1">
+                          <span className="text-[10px] text-stone-400 block font-semibold">
+                            Gợi ý chương trình đang diễn ra:
+                          </span>
+                          <div className="flex flex-wrap gap-1.5">
+                            {activePromosList.map((p) => (
+                              <button
+                                key={p.id}
+                                type="button"
+                                onClick={() => handleApplyVoucher(p.code || p.name)}
+                                className={`px-2.5 py-1 rounded-lg text-[10px] font-medium border text-left flex items-center gap-1 transition ${
+                                  activeInvoice?.voucherCode === p.code
+                                    ? "bg-amber-500/20 border-amber-500 text-amber-300 font-bold"
+                                    : "bg-stone-950 border-stone-800 text-stone-300 hover:border-amber-500/40"
+                                }`}
+                              >
+                                {p.isAutoApply ? <Zap className="w-3 h-3 text-emerald-400" /> : <Gift className="w-3 h-3 text-amber-400" />}
+                                <span>{p.code ? p.code : p.name}</span>
+                                <span className="font-mono text-stone-400">
+                                  ({p.discountType === "Percent" ? `-${p.discountValue}%` : `-${p.discountValue.toLocaleString("vi-VN")}đ`})
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Right Column: Calculations & Payment Tender */}
+                  {activeInvoice && (
+                    <div className="md:col-span-5 space-y-4 flex flex-col justify-between">
+                      {/* Financial Breakdown (STT 61) */}
+                      <div className="bg-stone-900 border border-stone-800 rounded-2xl p-4 space-y-2.5 text-xs">
+                        <div className="flex justify-between text-stone-400">
+                          <span>Tạm tính (Tiền món):</span>
+                          <span className="font-mono text-stone-200 font-bold">
+                            {activeInvoice.subTotalAmount.toLocaleString("vi-VN")}đ
+                          </span>
+                        </div>
+
+                        {activeInvoice.discountAmount > 0 && (
+                          <div className="flex justify-between text-rose-400 font-semibold">
+                            <span>Giảm giá / Chiết khấu:</span>
+                            <span className="font-mono">
+                              -{activeInvoice.discountAmount.toLocaleString("vi-VN")}đ
+                            </span>
+                          </div>
+                        )}
+
+                        {activeInvoice.serviceChargeAmount > 0 && (
+                          <div className="flex justify-between text-stone-400">
+                            <span>Phí dịch vụ ({activeInvoice.serviceChargePercent}%):</span>
+                            <span className="font-mono text-stone-200">
+                              +{activeInvoice.serviceChargeAmount.toLocaleString("vi-VN")}đ
+                            </span>
+                          </div>
+                        )}
+
+                        {activeInvoice.taxAmount > 0 && (
+                          <div className="flex justify-between text-stone-400">
+                            <span>Thuế VAT ({activeInvoice.taxRatePercent}%):</span>
+                            <span className="font-mono text-stone-200">
+                              +{activeInvoice.taxAmount.toLocaleString("vi-VN")}đ
+                            </span>
+                          </div>
+                        )}
+
+                        <div className="pt-2 border-t border-stone-800 flex items-baseline justify-between">
+                          <span className="text-sm font-extrabold text-white uppercase">TỔNG CỘNG:</span>
+                          <span className="text-xl font-black text-emerald-400 font-mono">
+                            {activeInvoice.finalAmount.toLocaleString("vi-VN")}đ
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Payment Methods Selection (STT 59) */}
+                      <div className="bg-stone-900 border border-stone-800 rounded-2xl p-4 space-y-3">
+                        <span className="text-xs font-bold text-stone-300 uppercase tracking-wider block">
+                          Phương thức thanh toán (STT 59)
+                        </span>
+
+                        <div className="grid grid-cols-3 gap-2">
+                          {[
+                            { id: "Cash", label: "Tiền mặt", icon: DollarSign, color: "text-emerald-400" },
+                            { id: "BankTransfer", label: "VietQR / CK", icon: QrCode, color: "text-sky-400" },
+                            { id: "VNPay", label: "Cổng VNPay", icon: CreditCard, color: "text-sky-300" },
+                            { id: "MoMo", label: "Ví MoMo", icon: Smartphone, color: "text-pink-400" },
+                            { id: "CardPos", label: "Thẻ POS", icon: CreditCard, color: "text-purple-400" },
+                            { id: "EWallet", label: "Ví ZaloPay", icon: Smartphone, color: "text-blue-400" },
+                          ].map((pm) => {
+                            const Icon = pm.icon;
+                            const isSelected = paymentMethod === pm.id;
+                            return (
+                              <button
+                                key={pm.id}
+                                type="button"
+                                onClick={async () => {
+                                  setPaymentMethod(pm.id as any);
+                                  if (pm.id === "VNPay" && activeInvoice) {
+                                    try {
+                                      setIsGeneratingGatewayUrl(true);
+                                      const res = await api.createVNPayUrl({ invoiceId: activeInvoice.id });
+                                      setVnpayUrl(res.paymentUrl);
+                                    } catch {
+                                      // ignore
+                                    } finally {
+                                      setIsGeneratingGatewayUrl(false);
+                                    }
+                                  } else if (pm.id === "MoMo" && activeInvoice) {
+                                    try {
+                                      setIsGeneratingGatewayUrl(true);
+                                      const res = await api.createMoMoUrl({ invoiceId: activeInvoice.id });
+                                      setMomoQrUrl(res.qrCodeUrl || null);
+                                    } catch {
+                                      // ignore
+                                    } finally {
+                                      setIsGeneratingGatewayUrl(false);
+                                    }
+                                  }
+                                }}
+                                className={`p-2.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition ${
+                                  isSelected
+                                    ? "bg-amber-500 text-stone-950 border-amber-500 shadow-md"
+                                    : "bg-stone-950 border-stone-800 text-stone-300 hover:border-stone-700"
+                                }`}
+                              >
+                                <Icon className={`w-3.5 h-3.5 ${isSelected ? "text-stone-950" : pm.color}`} />
+                                <span className="truncate">{pm.label}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        {/* Method Specific UI */}
+                        {paymentMethod === "Cash" && (
+                          <div className="space-y-2 pt-2 border-t border-stone-800">
+                            <label className="text-[11px] text-stone-400 block font-semibold">
+                              Tiền mặt khách đưa:
+                            </label>
+                            <input
+                              type="number"
+                              value={receivedCash || ""}
+                              onChange={(e) => setReceivedCash(Number(e.target.value))}
+                              placeholder="Nhập số tiền..."
+                              className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3.5 py-2 text-sm font-mono font-bold text-emerald-400 focus:outline-none focus:border-amber-500"
+                            />
+
+                            {/* Quick cash denomination buttons */}
+                            <div className="flex flex-wrap gap-1.5 pt-1">
+                              {[
+                                { label: "Đủ tiền", val: activeInvoice.finalAmount },
+                                { label: "100k", val: 100000 },
+                                { label: "200k", val: 200000 },
+                                { label: "500k", val: 500000 },
+                                { label: "1 triệu", val: 1000000 },
+                              ].map((btn) => (
+                                <button
+                                  key={btn.label}
+                                  type="button"
+                                  onClick={() => setReceivedCash(btn.val)}
+                                  className="px-2.5 py-1 rounded-lg bg-stone-950 border border-stone-800 hover:border-stone-700 text-stone-300 text-[11px] font-mono font-semibold"
+                                >
+                                  {btn.label}
+                                </button>
+                              ))}
+                            </div>
+
+                            {/* Change amount calculation */}
+                            <div className="p-2.5 rounded-xl bg-stone-950 border border-stone-800/80 flex items-center justify-between">
+                              <span className="text-xs text-stone-400">Tiền thừa trả khách:</span>
+                              <span className="text-base font-black text-amber-400 font-mono">
+                                {Math.max(0, receivedCash - activeInvoice.finalAmount).toLocaleString("vi-VN")}đ
+                              </span>
+                            </div>
+                          </div>
+                        )}
+
+                        {paymentMethod === "BankTransfer" && vietQrInfo && (
+                          <div className="space-y-2 pt-2 border-t border-stone-800 text-center">
+                            <p className="text-[11px] text-stone-300 font-semibold">
+                              Quét mã VietQR chuyển khoản chính xác số tiền:
+                            </p>
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={vietQrInfo.qrUrl}
+                              alt="VietQR"
+                              className="w-36 h-36 mx-auto rounded-xl border border-stone-700 shadow-lg"
+                            />
+                            <div className="text-[10px] text-stone-400 font-mono">
+                              <div>{vietQrInfo.bankCode} • STK: {vietQrInfo.accountNo}</div>
+                              <div>Nội dung: <strong className="text-amber-400">{vietQrInfo.description}</strong></div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* VNPay Gateway UI (STT 102) */}
+                        {paymentMethod === "VNPay" && (
+                          <div className="space-y-3 pt-2 border-t border-stone-800 text-center">
+                            <p className="text-[11px] text-stone-300 font-semibold">
+                              Cổng thanh toán điện tử VNPay (VNPAY-QR / Thẻ ATM / Visa):
+                            </p>
+                            {isGeneratingGatewayUrl ? (
+                              <div className="py-4">
+                                <RefreshCw className="w-6 h-6 animate-spin text-sky-400 mx-auto mb-1" />
+                                <span className="text-[11px] text-stone-400">Đang khởi tạo cổng VNPay...</span>
+                              </div>
+                            ) : vnpayUrl ? (
+                              <div className="space-y-2">
+                                <a
+                                  href={vnpayUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="w-full py-2.5 rounded-xl bg-sky-500 hover:bg-sky-400 text-stone-950 font-bold text-xs shadow-lg transition flex items-center justify-center gap-2"
+                                >
+                                  <CreditCard className="w-4 h-4" />
+                                  <span>Mở Cổng Thanh Toán VNPay ↗</span>
+                                </a>
+                                <p className="text-[10px] text-stone-500">
+                                  Hệ thống sẽ tự động đóng bàn khi nhận được phản hồi IPN từ VNPay.
+                                </p>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  if (!activeInvoice) return;
+                                  setIsGeneratingGatewayUrl(true);
+                                  try {
+                                    const res = await api.createVNPayUrl({ invoiceId: activeInvoice.id });
+                                    setVnpayUrl(res.paymentUrl);
+                                  } catch {
+                                    // ignore
+                                  } finally {
+                                    setIsGeneratingGatewayUrl(false);
+                                  }
+                                }}
+                                className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold"
+                              >
+                                Tạo liên kết VNPay
+                              </button>
+                            )}
+                          </div>
+                        )}
+
+                        {/* MoMo Gateway UI (STT 102) */}
+                        {paymentMethod === "MoMo" && (
+                          <div className="space-y-2 pt-2 border-t border-stone-800 text-center">
+                            <p className="text-[11px] text-stone-300 font-semibold">
+                              Quét mã Ví MoMo để thanh toán:
+                            </p>
+                            {momoQrUrl && (
+                              /* eslint-disable-next-line @next/next/no-img-element */
+                              <img
+                                src={momoQrUrl}
+                                alt="MoMo QR"
+                                className="w-36 h-36 mx-auto rounded-xl border border-pink-500/40 shadow-lg"
+                              />
+                            )}
+                            <p className="text-[10px] text-stone-400">
+                              Mở App MoMo quét mã QR trên hoặc bấm Xác nhận thu tiền bên dưới.
+                            </p>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Settle Action Button */}
+                      <button
+                        type="button"
+                        disabled={isSettlingPayment}
+                        onClick={handleConfirmPayment}
+                        className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 disabled:opacity-50 text-stone-950 font-black text-sm shadow-xl shadow-emerald-500/20 transition-all flex items-center justify-center gap-2"
+                      >
+                        {isSettlingPayment ? (
+                          <>
+                            <RefreshCw className="w-4 h-4 animate-spin" />
+                            <span>Đang xử lý thanh toán...</span>
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle2 className="w-5 h-5" />
+                            <span>XÁC NHẬN THU TIỀN & ĐÓNG BÀN</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+      {/* ============================================================== */}
       {/* MODAL: CUSTOMIZE ITEM OPTIONS & TOPPINGS                       */}
       {/* ============================================================== */}
       {customizingItem && (
@@ -1295,8 +2293,16 @@ function PosContent() {
               </button>
             </div>
 
-            {/* Modal Body: Option Groups */}
+            {/* Modal Body: Option Groups & Details */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {/* Detailed Description */}
+              {customizingItem.description && (
+                <div className="p-3 rounded-xl bg-stone-950/60 border border-stone-800/80 text-xs text-stone-300 leading-relaxed">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-amber-500 mb-1">Mô tả & Thành phần:</div>
+                  {customizingItem.description}
+                </div>
+              )}
+
               {customizingItem.options.map((opt) => {
                 const selectedValIds = optionSelections[opt.id] || [];
                 return (

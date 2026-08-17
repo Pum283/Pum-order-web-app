@@ -14,7 +14,19 @@ public class TablesController(IFloorService floorService, IConfiguration config)
 {
     private string GetFrontendBaseUrl()
     {
-        return config["App:FrontendUrl"] ?? "http://localhost:1212";
+        var origin = Request.Headers.Origin.FirstOrDefault();
+        if (!string.IsNullOrWhiteSpace(origin) && !origin.Contains("localhost"))
+            return origin.TrimEnd('/');
+
+        var referer = Request.Headers.Referer.FirstOrDefault();
+        if (!string.IsNullOrWhiteSpace(referer) && Uri.TryCreate(referer, UriKind.Absolute, out var refUri) && !refUri.Host.Contains("localhost"))
+            return $"{refUri.Scheme}://{refUri.Authority}";
+
+        var configured = config["App:FrontendUrl"];
+        if (!string.IsNullOrWhiteSpace(configured))
+            return configured.TrimEnd('/');
+
+        return "http://pumorder.runasp.net";
     }
 
     private (int Level, Guid? BranchId) GetActorContext()

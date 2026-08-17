@@ -114,6 +114,29 @@ public class UsersController(IAuthService auth) : ControllerBase
         }
     }
 
+    [HttpPut("{id:guid}/assigned-areas")]
+    public async Task<ActionResult<UserDto>> AssignAreas(Guid id, [FromBody] AssignStaffAreasRequest request, CancellationToken ct)
+    {
+        try
+        {
+            var roleLevel = GetUserRoleLevel();
+            var branchId = GetUserBranchId();
+            var res = await auth.AssignStaffAreasAsync(id, request.AreaIds, roleLevel, branchId, ct);
+            return Ok(res);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpGet("{id:guid}/assigned-areas")]
+    public async Task<ActionResult<List<Guid>>> GetAssignedAreaIds(Guid id, CancellationToken ct)
+    {
+        var list = await auth.GetStaffAssignedAreaIdsAsync(id, ct);
+        return Ok(list);
+    }
+
     private Guid GetUserId()
     {
         var sub = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub");

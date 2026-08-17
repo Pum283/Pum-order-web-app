@@ -38,6 +38,8 @@ import {
   Ban,
   Sliders,
   Image as ImageIcon,
+  Upload,
+  Loader2,
 } from "lucide-react";
 
 export default function MenuManagementPage() {
@@ -214,6 +216,46 @@ export default function MenuManagementPage() {
   const selectedBranch = branches.find((b) => b.id === selectedBranchId);
   const canManageMenu = userRoleLevel <= 3; // Quản lý trở lên
 
+  // Image Upload states (Cloudinary)
+  const [uploadingItemImage, setUploadingItemImage] = useState(false);
+  const [uploadingCatImage, setUploadingCatImage] = useState(false);
+
+  const handleUploadItemImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingItemImage(true);
+    setErrorMsg(null);
+    try {
+      const res = await api.uploadImage(file, "Web Order");
+      setItemFormData((prev) => ({ ...prev, imageUrl: res.url }));
+      setSuccessMsg(`Tải ảnh lên Cloudinary thành công: ${res.fileName}`);
+    } catch (err: unknown) {
+      const error = err as { message?: string };
+      setErrorMsg(error.message || "Tải ảnh lên Cloudinary thất bại.");
+    } finally {
+      setUploadingItemImage(false);
+      e.target.value = "";
+    }
+  };
+
+  const handleUploadCatImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingCatImage(true);
+    setErrorMsg(null);
+    try {
+      const res = await api.uploadImage(file, "Web Order");
+      setCategoryFormData((prev) => ({ ...prev, imageUrl: res.url }));
+      setSuccessMsg(`Tải ảnh danh mục lên Cloudinary thành công: ${res.fileName}`);
+    } catch (err: unknown) {
+      const error = err as { message?: string };
+      setErrorMsg(error.message || "Tải ảnh lên Cloudinary thất bại.");
+    } finally {
+      setUploadingCatImage(false);
+      e.target.value = "";
+    }
+  };
+
   // --- CATEGORY ACTIONS ---
   const handleOpenCreateCategory = () => {
     setEditingCategory(null);
@@ -230,8 +272,8 @@ export default function MenuManagementPage() {
   const handleOpenEditCategory = (cat: MenuCategoryDto) => {
     setEditingCategory(cat);
     setCategoryFormData({
-      code: cat.Code || cat.code,
-      name: cat.Name || cat.name,
+      code: cat.code || "",
+      name: cat.name || "",
       imageUrl: cat.imageUrl || "",
       sortOrder: cat.sortOrder,
       isActive: cat.isActive,
@@ -1230,18 +1272,48 @@ export default function MenuManagementPage() {
                     />
                   </div>
 
-                  {/* Image URL & Quick Suggestions */}
+                  {/* Image Upload to Cloudinary & URL */}
                   <div className="space-y-2">
-                    <label className="block text-xs font-semibold text-stone-300">
-                      Link ảnh món ăn (URL)
-                    </label>
-                    <input
-                      type="url"
-                      placeholder="https://images.unsplash.com/..."
-                      value={itemFormData.imageUrl}
-                      onChange={(e) => setItemFormData({ ...itemFormData, imageUrl: e.target.value })}
-                      className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3.5 py-2 text-xs text-stone-200 focus:outline-none focus:border-amber-500 font-mono"
-                    />
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-semibold text-stone-300">
+                        Ảnh món ăn (Cloudinary)
+                      </label>
+                      <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-stone-950 font-bold text-[11px] shadow-sm transition">
+                        {uploadingItemImage ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span>Đang tải lên Cloudinary...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Upload className="w-3.5 h-3.5" />
+                            <span>Tải ảnh từ máy</span>
+                          </>
+                        )}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          disabled={uploadingItemImage}
+                          onChange={handleUploadItemImage}
+                          className="hidden"
+                        />
+                      </label>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="url"
+                        placeholder="https://res.cloudinary.com/... hoặc dán link ảnh"
+                        value={itemFormData.imageUrl}
+                        onChange={(e) => setItemFormData({ ...itemFormData, imageUrl: e.target.value })}
+                        className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3.5 py-2 text-xs text-stone-200 focus:outline-none focus:border-amber-500 font-mono"
+                      />
+                      {itemFormData.imageUrl && (
+                        <div className="w-10 h-10 shrink-0 rounded-lg overflow-hidden border border-amber-500/40 bg-stone-900">
+                          <img src={itemFormData.imageUrl} alt="Preview" className="w-full h-full object-cover" />
+                        </div>
+                      )}
+                    </div>
 
                     {/* Quick suggested food photos */}
                     <div className="flex flex-wrap items-center gap-1.5 pt-1">
@@ -1515,17 +1587,46 @@ export default function MenuManagementPage() {
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-stone-300 mb-1.5">
-                  Link ảnh minh họa danh mục (tùy chọn)
-                </label>
-                <input
-                  type="url"
-                  placeholder="https://..."
-                  value={categoryFormData.imageUrl}
-                  onChange={(e) => setCategoryFormData({ ...categoryFormData, imageUrl: e.target.value })}
-                  className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3.5 py-2.5 text-xs text-stone-100 font-mono focus:outline-none focus:border-purple-500"
-                />
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-semibold text-stone-300">
+                    Ảnh danh mục (Cloudinary)
+                  </label>
+                  <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-purple-500 hover:bg-purple-600 text-white font-bold text-[11px] shadow-sm transition">
+                    {uploadingCatImage ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Đang tải lên...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>Tải ảnh từ máy</span>
+                      </>
+                    )}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      disabled={uploadingCatImage}
+                      onChange={handleUploadCatImage}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="url"
+                    placeholder="https://res.cloudinary.com/... hoặc dán link ảnh"
+                    value={categoryFormData.imageUrl}
+                    onChange={(e) => setCategoryFormData({ ...categoryFormData, imageUrl: e.target.value })}
+                    className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3.5 py-2.5 text-xs text-stone-100 font-mono focus:outline-none focus:border-purple-500"
+                  />
+                  {categoryFormData.imageUrl && (
+                    <div className="w-10 h-10 shrink-0 rounded-lg overflow-hidden border border-purple-500/40 bg-stone-900">
+                      <img src={categoryFormData.imageUrl} alt="Category Preview" className="w-full h-full object-cover" />
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div className="flex items-center justify-end gap-3 pt-3 border-t border-stone-800">

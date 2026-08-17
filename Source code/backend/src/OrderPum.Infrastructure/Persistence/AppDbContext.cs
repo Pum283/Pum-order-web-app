@@ -22,6 +22,15 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<OrderTicket> OrderTickets => Set<OrderTicket>();
     public DbSet<OrderLine> OrderLines => Set<OrderLine>();
     public DbSet<TableNotification> TableNotifications => Set<TableNotification>();
+    public DbSet<OrderPum.Domain.Entities.Payment.Invoice> Invoices => Set<OrderPum.Domain.Entities.Payment.Invoice>();
+    public DbSet<OrderPum.Domain.Entities.Payment.InvoiceLine> InvoiceLines => Set<OrderPum.Domain.Entities.Payment.InvoiceLine>();
+    public DbSet<OrderPum.Domain.Entities.Payment.PaymentTransaction> Payments => Set<OrderPum.Domain.Entities.Payment.PaymentTransaction>();
+    public DbSet<OrderPum.Domain.Entities.Promo.Promotion> Promotions => Set<OrderPum.Domain.Entities.Promo.Promotion>();
+    public DbSet<OrderPum.Domain.Entities.Payment.PaymentGatewayConfig> PaymentGatewayConfigs => Set<OrderPum.Domain.Entities.Payment.PaymentGatewayConfig>();
+    public DbSet<StaffAreaAssignment> StaffAreaAssignments => Set<StaffAreaAssignment>();
+    public DbSet<OrderPum.Domain.Entities.Staff.ShiftTemplate> ShiftTemplates => Set<OrderPum.Domain.Entities.Staff.ShiftTemplate>();
+    public DbSet<OrderPum.Domain.Entities.Staff.StaffShiftSchedule> StaffShiftSchedules => Set<OrderPum.Domain.Entities.Staff.StaffShiftSchedule>();
+    public DbSet<OrderPum.Domain.Entities.Staff.AttendanceRecord> AttendanceRecords => Set<OrderPum.Domain.Entities.Staff.AttendanceRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

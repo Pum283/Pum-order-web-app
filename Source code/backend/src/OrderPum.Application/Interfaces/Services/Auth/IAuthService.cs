@@ -52,4 +52,6 @@ public interface IAuthService
     );
 
     Task<IReadOnlyList<BranchSimpleDto>> ListBranchesAsync(CancellationToken ct = default);
+    Task<UserDto> AssignStaffAreasAsync(Guid userId, List<Guid> areaIds, int currentRoleLevel, Guid? currentBranchId, CancellationToken ct = default);
+    Task<List<Guid>> GetStaffAssignedAreaIdsAsync(Guid userId, CancellationToken ct = default);
 }

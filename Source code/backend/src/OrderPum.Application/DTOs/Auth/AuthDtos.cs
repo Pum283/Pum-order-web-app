@@ -14,7 +14,9 @@ public record LoginResponse(
     int RoleLevel,
     string RoleDisplayName,
     Guid? BranchId,
-    string? BranchName
+    string? BranchName,
+    List<Guid>? AssignedAreaIds = null,
+    List<string>? AssignedAreaNames = null
 );
 
 public record UserDto(
@@ -27,6 +29,8 @@ public record UserDto(
     string RoleDisplayName,
     Guid? BranchId,
     string? BranchName,
+    List<Guid> AssignedAreaIds,
+    List<string> AssignedAreaNames,
     bool HasPin,
     bool IsLocked,
     DateTime CreatedAt,
@@ -40,7 +44,8 @@ public record CreateUserRequest(
     string DisplayName,
     Guid? RoleId,
     string? RoleCode,
-    Guid? BranchId
+    Guid? BranchId,
+    List<Guid>? AssignedAreaIds = null
 );
 
 public record UpdateUserRequest(
@@ -50,7 +55,12 @@ public record UpdateUserRequest(
     string DisplayName,
     Guid? RoleId,
     string? RoleCode,
-    Guid? BranchId
+    Guid? BranchId,
+    List<Guid>? AssignedAreaIds = null
+);
+
+public record AssignStaffAreasRequest(
+    List<Guid> AreaIds
 );
 
 public record ChangePasswordRequest(

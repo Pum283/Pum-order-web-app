@@ -22,4 +22,6 @@ public interface IOrderService
     Task<TableNotificationDto> RequestBillAsync(RequestBillRequest request, CancellationToken ct = default);
     Task<List<TableNotificationDto>> GetActiveNotificationsAsync(Guid branchId, CancellationToken ct = default);
     Task DismissNotificationAsync(Guid notificationId, Guid staffUserId, CancellationToken ct = default);
+    Task<List<OrderTicketDto>> GetPendingQrTicketsAsync(Guid branchId, CancellationToken ct = default);
+    Task<List<TableSessionDetailDto>> GetActiveSessionsAsync(Guid branchId, CancellationToken ct = default);
 }

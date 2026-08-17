@@ -119,6 +119,8 @@ public class OrderService(AppDbContext db) : IOrderService
             TableName = table?.Name ?? table?.Code ?? string.Empty,
             AreaName = area?.Name ?? string.Empty,
             SessionCode = session.SessionCode,
+            CustomerName = session.CustomerName,
+            CustomerPhone = session.CustomerPhone,
             GuestCount = session.GuestCount,
             Status = session.Status.ToString(),
             OpenedAt = session.OpenedAt,
@@ -135,7 +137,12 @@ public class OrderService(AppDbContext db) : IOrderService
         if (session.Status == TableSessionStatus.Closed)
             throw new InvalidOperationException("Phiên bàn đã kết thúc.");
 
-        var ticket = await CreateTicketAsync(session, OrderSource.StaffAssisted, staffUserId, request.Note, request.Lines, sendStraightToKitchen: true, ct);
+        if (!string.IsNullOrWhiteSpace(request.CustomerName))
+            session.CustomerName = request.CustomerName.Trim();
+        if (!string.IsNullOrWhiteSpace(request.CustomerPhone))
+            session.CustomerPhone = request.CustomerPhone.Trim();
+
+        var ticket = await CreateTicketAsync(session, OrderSource.StaffAssisted, staffUserId, request.CustomerName, request.CustomerPhone, request.Note, request.Lines, sendStraightToKitchen: true, ct);
 
         // Update table to Occupied
         var table = await db.Tables.FirstOrDefaultAsync(t => t.Id == session.TableId, ct);
@@ -166,11 +173,20 @@ public class OrderService(AppDbContext db) : IOrderService
                 TableId = table.Id,
                 SessionCode = $"SES-{DateTime.UtcNow:yyMMdd}-{new Random().Next(100, 999)}",
                 GuestCount = table.Capacity,
+                CustomerName = request.CustomerName?.Trim(),
+                CustomerPhone = request.CustomerPhone?.Trim(),
                 Status = TableSessionStatus.Open,
                 OpenedAt = DateTime.UtcNow,
                 CreatedAt = DateTime.UtcNow
             };
             db.TableSessions.Add(session);
+        }
+        else
+        {
+            if (!string.IsNullOrWhiteSpace(request.CustomerName))
+                session.CustomerName = request.CustomerName.Trim();
+            if (!string.IsNullOrWhiteSpace(request.CustomerPhone))
+                session.CustomerPhone = request.CustomerPhone.Trim();
         }
 
         if (table.Status != "Occupied")
@@ -179,10 +195,26 @@ public class OrderService(AppDbContext db) : IOrderService
             table.UpdatedAt = DateTime.UtcNow;
         }
 
+        // QR Orders start with PendingConfirm (waiting for staff confirmation - STT 24)
+        var ticket = await CreateTicketAsync(session, OrderSource.CustomerQr, null, request.CustomerName, request.CustomerPhone, request.Note, request.Lines, sendStraightToKitchen: false, ct);
+
+        // Create Realtime Notification for Staff / POS (STT 24)
+        var guestInfo = !string.IsNullOrWhiteSpace(request.CustomerName) ? $" ({request.CustomerName})" : "";
+        var totalQty = request.Lines.Sum(l => l.Quantity > 0 ? l.Quantity : 1);
+        var notif = new TableNotification
+        {
+            Id = Guid.NewGuid(),
+            BranchId = table.BranchId,
+            TableId = table.Id,
+            SessionId = session.Id,
+            Type = "NewQrOrder",
+            Message = $"Bàn {table.Name} vừa gửi gọi {totalQty} món{guestInfo}. Cần xác nhận gửi bếp!",
+            IsHandled = false,
+            CreatedAt = DateTime.UtcNow
+        };
+        db.TableNotifications.Add(notif);
         await db.SaveChangesAsync(ct);
 
-        // QR Orders start with PendingConfirm (waiting for staff confirmation - STT 24)
-        var ticket = await CreateTicketAsync(session, OrderSource.CustomerQr, null, request.Note, request.Lines, sendStraightToKitchen: false, ct);
         return await MapTicketDtoAsync(ticket.Id, ct);
     }
 
@@ -199,6 +231,18 @@ public class OrderService(AppDbContext db) : IOrderService
         {
             line.Status = OrderItemStatus.SentToKitchen;
             line.UpdatedAt = DateTime.UtcNow;
+        }
+
+        // Auto-mark any unhandled NewQrOrder notifications for this session as handled
+        var pendingNotifs = await db.TableNotifications
+            .Where(n => n.SessionId == ticket.SessionId && n.Type == "NewQrOrder" && !n.IsHandled && !n.IsDeleted)
+            .ToListAsync(ct);
+        foreach (var n in pendingNotifs)
+        {
+            n.IsHandled = true;
+            n.HandledByUserId = staffUserId;
+            n.HandledAt = DateTime.UtcNow;
+            n.UpdatedAt = DateTime.UtcNow;
         }
 
         await db.SaveChangesAsync(ct);
@@ -487,10 +531,87 @@ public class OrderService(AppDbContext db) : IOrderService
         }
     }
 
+    public async Task<List<OrderTicketDto>> GetPendingQrTicketsAsync(Guid branchId, CancellationToken ct = default)
+    {
+        var sessionIds = await db.TableSessions
+            .Where(s => s.BranchId == branchId && (s.Status == TableSessionStatus.Open || s.Status == TableSessionStatus.Paying) && !s.IsDeleted)
+            .Select(s => s.Id)
+            .ToListAsync(ct);
+
+        if (sessionIds.Count == 0) return [];
+
+        var tickets = await db.OrderTickets
+            .Where(t => sessionIds.Contains(t.SessionId) && t.Source == OrderSource.CustomerQr && !t.IsDeleted)
+            .OrderByDescending(t => t.OrderedAt)
+            .ToListAsync(ct);
+
+        var result = new List<OrderTicketDto>();
+        foreach (var ticket in tickets)
+        {
+            var lines = await db.OrderLines
+                .Where(l => l.TicketId == ticket.Id && !l.IsDeleted && l.Status == OrderItemStatus.PendingConfirm)
+                .ToListAsync(ct);
+
+            if (lines.Count > 0)
+            {
+                var session = await db.TableSessions.FirstOrDefaultAsync(s => s.Id == ticket.SessionId, ct);
+                var table = session != null ? await db.Tables.FirstOrDefaultAsync(t => t.Id == session.TableId, ct) : null;
+
+                result.Add(new OrderTicketDto
+                {
+                    Id = ticket.Id,
+                    SessionId = ticket.SessionId,
+                    TicketNumber = ticket.TicketNumber,
+                    Source = ticket.Source.ToString(),
+                    CustomerName = ticket.CustomerName ?? session?.CustomerName,
+                    CustomerPhone = ticket.CustomerPhone ?? session?.CustomerPhone,
+                    Note = ticket.Note,
+                    OrderedAt = ticket.OrderedAt,
+                    Lines = lines.Select(l => new OrderLineDto
+                    {
+                        Id = l.Id,
+                        TicketId = l.TicketId,
+                        MenuItemId = l.MenuItemId,
+                        ItemCode = l.ItemCodeSnapshot,
+                        ItemName = l.ItemNameSnapshot,
+                        Quantity = l.Quantity,
+                        UnitPrice = l.UnitPrice,
+                        SelectedOptionsText = l.SelectedOptionsText,
+                        Note = l.Note,
+                        KitchenStation = l.KitchenStation,
+                        Status = l.Status.ToString()
+                    }).ToList()
+                });
+            }
+        }
+        return result;
+    }
+
+    public async Task<List<TableSessionDetailDto>> GetActiveSessionsAsync(Guid branchId, CancellationToken ct = default)
+    {
+        var sessions = await db.TableSessions
+            .Where(s => s.BranchId == branchId && (s.Status == TableSessionStatus.Open || s.Status == TableSessionStatus.Paying) && !s.IsDeleted)
+            .OrderByDescending(s => s.OpenedAt)
+            .ToListAsync(ct);
+
+        var result = new List<TableSessionDetailDto>();
+        foreach (var s in sessions)
+        {
+            var detail = await GetSessionByIdAsync(s.Id, ct);
+            if (detail != null)
+            {
+                result.Add(detail);
+            }
+        }
+        return result;
+    }
+
     private async Task<OrderTicket> CreateTicketAsync(
         TableSession session,
         OrderSource source,
         Guid? staffUserId,
+        string? customerName,
+        string? customerPhone,
         string? ticketNote,
         IReadOnlyList<StaffOrderLineRequest> lines,
         bool sendStraightToKitchen,
@@ -506,6 +627,8 @@ public class OrderService(AppDbContext db) : IOrderService
             TicketNumber = ticketCount + 1,
             Source = source,
             CreatedByUserId = staffUserId,
+            CustomerName = customerName?.Trim() ?? session.CustomerName,
+            CustomerPhone = customerPhone?.Trim() ?? session.CustomerPhone,
             Note = ticketNote?.Trim(),
             OrderedAt = DateTime.UtcNow,
             CreatedAt = DateTime.UtcNow
@@ -574,6 +697,8 @@ public class OrderService(AppDbContext db) : IOrderService
             SessionId = ticket.SessionId,
             TicketNumber = ticket.TicketNumber,
             Source = ticket.Source.ToString(),
+            CustomerName = ticket.CustomerName,
+            CustomerPhone = ticket.CustomerPhone,
             CreatedByUserName = staffName,
             Note = ticket.Note,
             OrderedAt = ticket.OrderedAt,

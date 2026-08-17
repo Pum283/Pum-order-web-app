@@ -39,6 +39,7 @@ import {
   DollarSign,
   Coffee,
   HelpCircle,
+  User,
 } from "lucide-react";
 
 interface QrCartItem {
@@ -72,6 +73,14 @@ function QrOrderContent() {
   // Cart & Drawer states
   const [cart, setCart] = useState<QrCartItem[]>([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
+  const [guestName, setGuestName] = useState<string>(() => {
+    if (typeof window !== "undefined") return localStorage.getItem("orderpum_guest_name") || "";
+    return "";
+  });
+  const [guestPhone, setGuestPhone] = useState<string>(() => {
+    if (typeof window !== "undefined") return localStorage.getItem("orderpum_guest_phone") || "";
+    return "";
+  });
   const [ticketNote, setTicketNote] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [activeTab, setActiveTab] = useState<"menu" | "session">("menu");
@@ -144,13 +153,9 @@ function QrOrderContent() {
     });
   }, [tableInfo, selectedCategoryId, searchKeyword]);
 
-  // Click on Item
+  // Click on Item - Luôn mở popup xem chi tiết món
   const handleItemClick = (item: MenuItemDetailDto) => {
-    if (item.options && item.options.length > 0) {
-      openCustomizationModal(item);
-    } else {
-      addDirectToCart(item);
-    }
+    openCustomizationModal(item);
   };
 
   const addDirectToCart = (item: MenuItemDetailDto) => {
@@ -295,6 +300,11 @@ function QrOrderContent() {
   const handleSubmitQrOrder = async () => {
     if (cart.length === 0 || !token) return;
 
+    if (!guestName.trim()) {
+      setToastMsg({ type: "error", text: "Vui lòng nhập tên của bạn để gửi order đến bếp/nhân viên." });
+      return;
+    }
+
     try {
       setIsSubmitting(true);
       const lines: StaffOrderLineRequest[] = cart.map((c) => ({
@@ -306,9 +316,19 @@ function QrOrderContent() {
 
       await api.placeQrOrder({
         tableQrToken: token,
+        customerName: guestName.trim(),
+        customerPhone: guestPhone.trim() || undefined,
         note: ticketNote.trim() || undefined,
         lines,
       });
+
+      // Persist guest name and phone
+      if (typeof window !== "undefined") {
+        localStorage.setItem("orderpum_guest_name", guestName.trim());
+        if (guestPhone.trim()) {
+          localStorage.setItem("orderpum_guest_phone", guestPhone.trim());
+        }
+      }
 
       // Clear Cart
       setCart([]);
@@ -657,10 +677,16 @@ function QrOrderContent() {
                   </div>
                 </div>
 
-                {/* Plus Button */}
+                {/* Plus Button - Thêm trực tiếp không mở popup */}
                 <button
                   type="button"
-                  className="w-9 h-9 rounded-xl bg-stone-800 group-hover:bg-amber-500 text-stone-300 group-hover:text-stone-950 flex items-center justify-center font-black transition-colors shrink-0 shadow-sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    addDirectToCart(item);
+                    setToastMsg({ type: "success", text: `Đã thêm +1 ${item.name} vào giỏ.` });
+                  }}
+                  className="w-9 h-9 rounded-xl bg-stone-800 hover:bg-amber-500 text-stone-300 hover:text-stone-950 flex items-center justify-center font-black transition-colors shrink-0 shadow-sm"
+                  title="Thêm nhanh 1 phần"
                 >
                   <Plus className="w-4 h-4" />
                 </button>
@@ -943,6 +969,50 @@ function QrOrderContent() {
 
             {/* Drawer Footer */}
             <div className="p-4 border-t border-stone-800 bg-stone-950/90 space-y-3">
+              {/* Customer Info Section (Bắt buộc Tên, Tùy chọn SĐT) */}
+              <div className="p-3.5 rounded-xl bg-stone-900 border border-stone-800 space-y-2">
+                <div className="flex items-center justify-between text-xs font-bold text-amber-400">
+                  <span className="flex items-center gap-1.5">
+                    <User className="w-3.5 h-3.5" />
+                    Thông tin khách hàng
+                  </span>
+                  <span className="text-[10px] text-stone-400 font-normal">Để nhận ưu đãi & tích điểm</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-stone-300 mb-1">
+                      Tên của bạn <span className="text-rose-400">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="VD: Anh Hùng, Chị Lan..."
+                      value={guestName}
+                      onChange={(e) => {
+                        setGuestName(e.target.value);
+                        if (typeof window !== "undefined") localStorage.setItem("orderpum_guest_name", e.target.value);
+                      }}
+                      className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3 py-2 text-xs text-stone-100 placeholder-stone-600 focus:outline-none focus:border-amber-500 font-medium"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-stone-300 mb-1">
+                      Số điện thoại (tùy chọn)
+                    </label>
+                    <input
+                      type="tel"
+                      placeholder="VD: 0901234567"
+                      value={guestPhone}
+                      onChange={(e) => {
+                        setGuestPhone(e.target.value);
+                        if (typeof window !== "undefined") localStorage.setItem("orderpum_guest_phone", e.target.value);
+                      }}
+                      className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3 py-2 text-xs text-stone-100 placeholder-stone-600 focus:outline-none focus:border-amber-500 font-mono"
+                    />
+                  </div>
+                </div>
+              </div>
+
               <input
                 type="text"
                 placeholder="Ghi chú thêm cho nhân viên (VD: Khách ăn vội...)"
@@ -1162,8 +1232,16 @@ function QrOrderContent() {
               </button>
             </div>
 
-            {/* Option Groups */}
+            {/* Option Groups & Details */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {/* Detailed Description */}
+              {customizingItem.description && (
+                <div className="p-3 rounded-xl bg-stone-950/60 border border-stone-800/80 text-xs text-stone-300 leading-relaxed">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-amber-500 mb-1">Mô tả & Hương vị:</div>
+                  {customizingItem.description}
+                </div>
+              )}
+
               {customizingItem.options.map((opt) => {
                 const selectedValIds = optionSelections[opt.id] || [];
                 return (

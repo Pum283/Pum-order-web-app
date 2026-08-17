@@ -23,6 +23,14 @@ import {
   Store,
   Layers,
   ShoppingCart,
+  Flame,
+  Receipt,
+  Tag,
+  CreditCard,
+  Calendar,
+  Clock,
+  Bell,
+  Check,
 } from "lucide-react";
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -37,6 +45,41 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const [confirmPassword, setConfirmPassword] = useState("");
   const [pwdLoading, setPwdLoading] = useState(false);
   const [pwdMsg, setPwdMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
+  // Global Realtime Notifications state
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [notifDropdownOpen, setNotifDropdownOpen] = useState(false);
+
+  const formatTime = (dateStr?: string) => {
+    if (!dateStr) return "";
+    try {
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return "";
+      return d.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
+    } catch {
+      return "";
+    }
+  };
+
+  // Live polling for table notifications
+  useEffect(() => {
+    if (!user || !token) return;
+    const branchId = user.branchId;
+    if (!branchId) return;
+
+    const fetchNotifs = async () => {
+      try {
+        const list = await api.getNotifications(branchId);
+        setNotifications(Array.isArray(list) ? list : []);
+      } catch {
+        setNotifications([]);
+      }
+    };
+
+    fetchNotifs();
+    const interval = setInterval(fetchNotifs, 4000);
+    return () => clearInterval(interval);
+  }, [user, token]);
 
   useEffect(() => {
     if (!isLoading && (!token || !user)) {
@@ -161,6 +204,60 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       badgeColor: "bg-amber-500/10 text-amber-400 border-amber-500/20",
     },
     {
+      name: "Màn hình Bếp (KDS)",
+      href: "/kds",
+      icon: Flame,
+      active: pathname.startsWith("/kds"),
+      allowed: true,
+      badge: "STT 51, 53",
+      badgeColor: "bg-rose-500/10 text-rose-400 border-rose-500/20",
+    },
+    {
+      name: "Hóa đơn & Thu ngân",
+      href: "/admin/invoices",
+      icon: Receipt,
+      active: pathname.startsWith("/admin/invoices"),
+      allowed: true,
+      badge: "STT 57-61",
+      badgeColor: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
+    },
+    {
+      name: "Khuyến mãi & Voucher",
+      href: "/admin/promotions",
+      icon: Tag,
+      active: pathname.startsWith("/admin/promotions"),
+      allowed: true,
+      badge: "STT 60, 64-71",
+      badgeColor: "bg-amber-500/10 text-amber-400 border-amber-500/20",
+    },
+    {
+      name: "Cổng Thanh toán",
+      href: "/admin/payment-gateways",
+      icon: CreditCard,
+      active: pathname.startsWith("/admin/payment-gateways"),
+      allowed: canManageUsers,
+      badge: "STT 102",
+      badgeColor: "bg-sky-500/10 text-sky-400 border-sky-500/20",
+    },
+    {
+      name: "Ca làm & Xếp lịch",
+      href: "/admin/shifts",
+      icon: Calendar,
+      active: pathname.startsWith("/admin/shifts"),
+      allowed: canManageUsers,
+      badge: "STT 74-80",
+      badgeColor: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
+    },
+    {
+      name: "Bảng Chấm Công",
+      href: "/admin/attendance",
+      icon: Clock,
+      active: pathname.startsWith("/admin/attendance"),
+      allowed: canManageUsers,
+      badge: "STT 77-78",
+      badgeColor: "bg-teal-500/10 text-teal-400 border-teal-500/20",
+    },
+    {
       name: "Thực đơn & Giá",
       href: "/admin/menu",
       icon: UtensilsCrossed,
@@ -190,86 +287,84 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
       {/* Sidebar */}
       <aside
-        className={`fixed md:sticky top-0 h-screen w-72 bg-stone-900 border-r border-stone-800 flex flex-col justify-between z-50 transition-transform duration-200 ${
+        className={`fixed md:sticky top-0 h-screen w-64 lg:w-72 bg-stone-900 border-r border-stone-800 flex flex-col z-50 transition-transform duration-200 overflow-hidden shrink-0 ${
           sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
         }`}
       >
         {/* Top Logo */}
-        <div>
-          <div className="p-5 border-b border-stone-800 flex items-center justify-between">
-            <Link href="/admin" className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-600 to-amber-400 flex items-center justify-center shadow-lg shadow-amber-500/20 text-stone-950 font-bold">
-                <UtensilsCrossed className="w-5 h-5" />
-              </div>
-              <div>
-                <span className="text-lg font-bold tracking-tight text-white flex items-center gap-1.5">
-                  OrderPum
-                </span>
-                <span className="text-[11px] text-amber-400 font-medium block">Web Quản Trị</span>
-              </div>
-            </Link>
-            <button
-              onClick={() => setSidebarOpen(false)}
-              className="md:hidden text-stone-400 hover:text-white p-1"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-
-          {/* Navigation Links */}
-          <nav className="p-3 space-y-1">
-            <div className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-stone-500">
-              Quản trị hệ thống
+        <div className="p-4 border-b border-stone-800 flex items-center justify-between shrink-0 bg-stone-900">
+          <Link href="/admin" className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-amber-600 to-amber-400 flex items-center justify-center shadow-lg shadow-amber-500/20 text-stone-950 font-bold">
+              <UtensilsCrossed className="w-5 h-5" />
             </div>
-            {navItems.filter((item) => item.allowed).map((item) => {
-              const Icon = item.icon;
-
-              return (
-                <Link
-                  key={item.name}
-                  href={item.href}
-                  onClick={() => setSidebarOpen(false)}
-                  className={`flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${
-                    item.active
-                      ? "bg-amber-500 text-stone-950 shadow-md shadow-amber-500/20 font-bold"
-                      : "text-stone-300 hover:bg-stone-800/80 hover:text-white"
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <Icon className="w-4 h-4" />
-                    <span>{item.name}</span>
-                  </div>
-                  {item.badge && (
-                    <span
-                      className={`text-[10px] px-1.5 py-0.5 rounded border ${
-                        item.active
-                          ? "bg-stone-950/20 text-stone-950 border-stone-950/30"
-                          : item.badgeColor || "bg-stone-800 text-stone-400 border-stone-700"
-                      }`}
-                    >
-                      {item.badge}
-                    </span>
-                  )}
-                </Link>
-              );
-            })}
-          </nav>
+            <div>
+              <span className="text-base font-bold tracking-tight text-white flex items-center gap-1.5 leading-none">
+                OrderPum
+              </span>
+              <span className="text-[10px] text-amber-400 font-medium block mt-0.5">Web Quản Trị</span>
+            </div>
+          </Link>
+          <button
+            onClick={() => setSidebarOpen(false)}
+            className="md:hidden text-stone-400 hover:text-white p-1"
+          >
+            <X className="w-5 h-5" />
+          </button>
         </div>
 
-        {/* User Card at bottom of Sidebar */}
-        <div className="p-4 border-t border-stone-800 bg-stone-950/50">
-          <div className="p-3 rounded-2xl bg-stone-900 border border-stone-800">
+        {/* Navigation Links - Scrollable */}
+        <nav className="flex-1 min-h-0 overflow-y-auto p-2.5 space-y-0.5">
+          <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-stone-500">
+            Quản trị hệ thống
+          </div>
+          {navItems.filter((item) => item.allowed).map((item) => {
+            const Icon = item.icon;
+
+            return (
+              <Link
+                key={item.name}
+                href={item.href}
+                onClick={() => setSidebarOpen(false)}
+                className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-all ${
+                  item.active
+                    ? "bg-amber-500 text-stone-950 shadow-md shadow-amber-500/20 font-bold"
+                    : "text-stone-300 hover:bg-stone-800/80 hover:text-white"
+                }`}
+              >
+                <div className="flex items-center gap-2.5 truncate">
+                  <Icon className="w-4 h-4 shrink-0" />
+                  <span className="truncate">{item.name}</span>
+                </div>
+                {item.badge && (
+                  <span
+                    className={`text-[9px] px-1.5 py-0.2 rounded border font-mono shrink-0 ml-1 ${
+                      item.active
+                        ? "bg-stone-950/20 text-stone-950 border-stone-950/30"
+                        : item.badgeColor || "bg-stone-800 text-stone-400 border-stone-700"
+                    }`}
+                  >
+                    {item.badge}
+                  </span>
+                )}
+              </Link>
+            );
+          })}
+        </nav>
+
+        {/* User Card at bottom of Sidebar - Fixed */}
+        <div className="p-3 border-t border-stone-800 bg-stone-950/80 shrink-0">
+          <div className="p-2.5 rounded-2xl bg-stone-900 border border-stone-800">
             <div className="flex items-start justify-between gap-2">
               <div className="truncate">
                 <div className="flex items-center gap-1.5 mb-1">
                   <span
-                    className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${roleStyle.badgeBg} ${roleStyle.badgeText} ${roleStyle.badgeBorder}`}
+                    className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md border ${roleStyle.badgeBg} ${roleStyle.badgeText} ${roleStyle.badgeBorder}`}
                   >
                     Cấp {user.roleLevel} · {user.roleDisplayName}
                   </span>
                 </div>
                 <h4 className="font-bold text-white text-xs truncate">{user.displayName}</h4>
-                <p className="text-[11px] text-stone-400 truncate">{user.phoneOrEmail}</p>
+                <p className="text-[10px] text-stone-400 truncate">{user.phoneOrEmail}</p>
                 <p className="text-[10px] text-amber-400/80 truncate mt-0.5 flex items-center gap-1">
                   <Store className="w-3 h-3 shrink-0" />
                   <span>{user.branchName || "Toàn chuỗi"}</span>
@@ -277,11 +372,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               </div>
             </div>
 
-            <div className="mt-3 pt-2.5 border-t border-stone-800/80 grid grid-cols-2 gap-1.5 text-xs">
+            <div className="mt-2.5 pt-2 border-t border-stone-800/80 grid grid-cols-2 gap-1.5 text-xs">
               <button
                 type="button"
                 onClick={() => setShowPasswordModal(true)}
-                className="flex items-center justify-center gap-1 py-1.5 px-2 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-300 text-[11px] font-medium transition"
+                className="flex items-center justify-center gap-1 py-1 px-2 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-300 text-[10px] font-medium transition"
               >
                 <KeyRound className="w-3 h-3" />
                 Đổi MK
@@ -289,7 +384,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               <button
                 type="button"
                 onClick={logout}
-                className="flex items-center justify-center gap-1 py-1.5 px-2 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/20 text-[11px] font-medium transition"
+                className="flex items-center justify-center gap-1 py-1 px-2 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/20 text-[10px] font-medium transition"
               >
                 <LogOut className="w-3 h-3" />
                 Đăng xuất
@@ -325,7 +420,77 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5">
+            {/* Realtime Notification Bell */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setNotifDropdownOpen(!notifDropdownOpen)}
+                className="relative p-2 rounded-xl bg-stone-950 hover:bg-stone-800 text-stone-300 border border-stone-800 transition flex items-center gap-1.5 text-xs font-bold"
+                title="Thông báo bàn phục vụ & gọi món"
+              >
+                <Bell className={`w-4 h-4 ${notifications.length > 0 ? "text-amber-400 animate-bounce" : "text-stone-400"}`} />
+                {notifications.length > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full bg-rose-500 text-white text-[10px] font-black animate-pulse">
+                    {notifications.length}
+                  </span>
+                )}
+              </button>
+
+              {/* Notification Dropdown */}
+              {notifDropdownOpen && (
+                <div className="absolute right-0 mt-2 w-80 sm:w-96 rounded-2xl bg-stone-900 border border-stone-800 shadow-2xl z-50 p-3 space-y-2 animate-in fade-in zoom-in-95">
+                  <div className="flex items-center justify-between pb-2 border-b border-stone-800">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-white">
+                      <Bell className="w-4 h-4 text-amber-400" />
+                      <span>Thông báo từ bàn ({notifications.length})</span>
+                    </div>
+                    <Link
+                      href="/admin/pos"
+                      onClick={() => setNotifDropdownOpen(false)}
+                      className="text-[11px] font-semibold text-amber-400 hover:text-amber-300"
+                    >
+                      Đến màn hình POS →
+                    </Link>
+                  </div>
+
+                  <div className="max-h-72 overflow-y-auto space-y-2">
+                    {Array.isArray(notifications) && notifications.length > 0 ? (
+                      notifications.map((n) => (
+                        <div
+                          key={n.id}
+                          className="p-2.5 rounded-xl bg-stone-950 border border-stone-800/80 hover:border-amber-500/40 text-xs flex flex-col gap-1 transition"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-amber-400">
+                              {n.tableName || n.tableCode} ({n.areaName || "Khu vực"})
+                            </span>
+                            <span className="text-[10px] text-stone-500 font-mono">
+                              {formatTime(n.createdAt)}
+                            </span>
+                          </div>
+                          <p className="text-stone-200 text-xs leading-relaxed">{n.message}</p>
+                          <div className="flex items-center justify-end gap-2 pt-1">
+                            <Link
+                              href={`/admin/pos?tableId=${n.tableId}`}
+                              onClick={() => setNotifDropdownOpen(false)}
+                              className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-[11px] transition shadow-sm"
+                            >
+                              Xem bàn & Xử lý
+                            </Link>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="py-6 text-center text-stone-500 text-xs">
+                        Không có yêu cầu nào đang chờ.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
             <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-stone-950 border border-stone-800 text-xs">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
               <span className="text-stone-300 font-medium">{user.branchName || "Hệ thống Chuỗi"}</span>
